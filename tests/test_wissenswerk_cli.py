@@ -283,6 +283,22 @@ class WissenswerkCliContractTests(unittest.TestCase):
             self.assertEqual(payload["status"], "ready")
             self.assertEqual(payload["steps"]["build"], 0)
 
+    def test_json_output_stays_clean_when_progress_goes_to_stderr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = self.temp_config(root)
+            fixture = wissenswerk.REPO_ROOT / "tests" / "fixtures" / "ragprep"
+            out = io.StringIO()
+            err = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = wissenswerk.main(
+                    ["--config", str(config_path), "ingest", "--from-ragprep", str(fixture), "--apply", "--json"]
+                )
+            self.assertEqual(code, 0)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload["status"], "ready")
+            self.assertIn("[wissenswerk] ingest:", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

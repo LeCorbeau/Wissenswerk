@@ -37,6 +37,11 @@ def json_print(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
+def progress(message: str, *, enabled: bool = True) -> None:
+    if enabled:
+        print(f"[wissenswerk] {message}", file=sys.stderr, flush=True)
+
+
 def load_json_like(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Missing file: {path}")
@@ -1088,13 +1093,16 @@ def validate_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def command_ingest(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
     import_dir = repo_path(args.from_ragprep)
+    progress(f"ingest: scanning RagPrep artifacts in {rel(import_dir)}")
     if not import_dir.exists():
         payload = {"status": "fail", "error": f"RagPrep import directory missing: {rel(import_dir)}"}
         json_print(payload) if args.json else print(payload["error"])
         return 2
     raw_records = iter_ragprep_records(import_dir)
+    progress(f"ingest: loaded {len(raw_records)} raw record(s)")
     chunks = [normalize_chunk(record, config.get("project", {}).get("language", "de")) for record in raw_records]
     findings = validate_chunks(chunks)
+    progress(f"ingest: normalized {len(chunks)} chunk(s); validation findings={len(findings)}")
     task_events = []
     if findings:
         store = default_task_store(config)
@@ -1128,9 +1136,11 @@ def command_ingest(args: argparse.Namespace) -> int:
         state_dir = repo_path(config.get("paths", {}).get("ragprep_imports", ".wissenswerk/ragprep_imports"))
         ensure_dir(state_dir)
         state_path = state_dir / f"ragprep_import_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.json"
+        progress(f"ingest: writing import state to {rel(state_path)}")
         state_path.write_text(json.dumps({"generated_at": now_iso(), "chunks": chunks}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         payload["written"].append(rel(state_path))
     report_path = write_report(config, "ragprep_ingest", payload)
+    progress(f"ingest: wrote report {rel(report_path)}")
     payload["report_path"] = rel(report_path)
     json_print(payload) if args.json else print(f"{status}: {len(chunks)} chunks; report {rel(report_path)}")
     return 1 if findings else 0
@@ -1367,7 +1377,14 @@ def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], 
 def command_analyze(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
     state_path, chunks = latest_import_state(config)
+    progress(f"analyze: reading import state {rel(state_path) if state_path else '[missing]'}")
     analysis = build_corpus_analysis(config, chunks, state_path)
+    progress(
+        "analyze: built inventory "
+        f"documents={analysis['corpus_inventory']['documents_total']} "
+        f"chunks={analysis['corpus_inventory']['chunks_total']} "
+        f"entities={len(analysis['entities'])} claims={len(analysis['claims'])}"
+    )
     task_events = []
     for finding in analysis["validation_findings"]:
         missing = ",".join(finding.get("missing", []))
@@ -1404,6 +1421,7 @@ def command_analyze(args: argparse.Namespace) -> int:
     }
     if args.apply:
         out_dir = analysis_dir(config)
+        progress(f"analyze: writing analysis artifacts to {rel(out_dir)}")
         write_json(out_dir / "analysis.json", analysis)
         write_json(out_dir / "corpus_inventory.json", analysis["corpus_inventory"])
         write_json(out_dir / "entities.json", {"entities": analysis["entities"]})
@@ -1415,6 +1433,7 @@ def command_analyze(args: argparse.Namespace) -> int:
             for name in ["analysis.json", "corpus_inventory.json", "entities.json", "claims.json", "graph.json", "conflicts.json"]
         )
     report_path = write_report(config, "analysis", payload)
+    progress(f"analyze: wrote report {rel(report_path)}")
     payload["report_path"] = rel(report_path)
     json_print(payload) if args.json else print(f"Wissenswerk analyze: {payload['status']}")
     return 1 if analysis["validation_findings"] else 0
@@ -1509,9 +1528,13 @@ def command_plan_articles(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
     analysis = latest_analysis(config)
     if not analysis:
+        progress("plan articles: no saved analysis found; building analysis in memory")
         state_path, chunks = latest_import_state(config)
         analysis = build_corpus_analysis(config, chunks, state_path)
+    else:
+        progress("plan articles: using saved analysis artifacts")
     plan = build_article_plan(config, analysis)
+    progress(f"plan articles: planned {len(plan['article_candidates'])} article candidate(s)")
     payload = {
         "status": "ready" if plan["article_candidates"] else "empty",
         "mode": "auto-apply" if args.apply else "dry-run",
@@ -1522,9 +1545,11 @@ def command_plan_articles(args: argparse.Namespace) -> int:
     }
     if args.apply:
         out_dir = article_plan_dir(config)
+        progress(f"plan articles: writing article plan to {rel(out_dir / 'article_plan.json')}")
         write_json(out_dir / "article_plan.json", plan)
         payload["written"].append(rel(out_dir / "article_plan.json"))
     report_path = write_report(config, "article_plan", payload)
+    progress(f"plan articles: wrote report {rel(report_path)}")
     payload["report_path"] = rel(report_path)
     json_print(payload) if args.json else print(f"Wissenswerk plan articles: {payload['status']}")
     return 0
@@ -1730,11 +1755,14 @@ def command_build(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
     wiki_root = repo_path(config.get("paths", {}).get("wiki", "docs/Wiki"))
     state_path, chunks = latest_import_state(config)
+    progress(f"build: loading import state {rel(state_path) if state_path else '[missing]'}")
     analysis = latest_analysis(config)
     if not analysis:
+        progress("build: no saved analysis found; building analysis in memory")
         analysis = build_corpus_analysis(config, chunks, state_path)
     plan = latest_article_plan(config)
     if not plan:
+        progress("build: no saved article plan found; planning articles in memory")
         plan = build_article_plan(config, analysis)
     candidates = [
         candidate
@@ -1743,6 +1771,7 @@ def command_build(args: argparse.Namespace) -> int:
     ]
     if not candidates:
         candidates = plan.get("article_candidates", [])[:5]
+    progress(f"build: selected {len(candidates)} article candidate(s)")
     task_events = []
     if not chunks:
         result = default_task_store(config).raise_signal(
@@ -1771,6 +1800,7 @@ def command_build(args: argparse.Namespace) -> int:
         titles = [str(candidate.get("title", "")) for candidate in candidates]
         for index, candidate in enumerate(candidates, start=1):
             title = str(candidate.get("title") or f"Article {index}")
+            progress(f"build: writing article {index}/{len(candidates)}: {title}")
             slug = slugify_title(title, f"article_{index}")
             claims = claims_for_candidate(candidate, analysis)
             refs = source_refs_for_claims(claims, chunks)
@@ -1797,6 +1827,7 @@ def command_build(args: argparse.Namespace) -> int:
         )
         payload["written"].append(rel(index_path))
     report_path = write_report(config, "wiki_build", payload)
+    progress(f"build: wrote report {rel(report_path)}")
     payload["report_path"] = rel(report_path)
     json_print(payload) if args.json else print(f"Wissenswerk build: {payload['status']}")
     return 0
@@ -2917,10 +2948,12 @@ def command_demo_run(args: argparse.Namespace) -> int:
     step_outputs: dict[str, str] = {}
 
     def run_step(name: str, func: Any, namespace: argparse.Namespace) -> int:
+        progress(f"demo run: starting {name}")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = func(namespace)
         step_outputs[name] = out.getvalue()
+        progress(f"demo run: finished {name} exit={code}")
         return code
 
     setup_code = run_step("setup", command_setup, setup_args)
