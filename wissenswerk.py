@@ -144,14 +144,14 @@ class TaskStore:
     def next_id(self, conn: sqlite3.Connection) -> str:
         year = datetime.now(timezone.utc).year
         prefix = f"TASK-{year}-"
-        row = conn.execute("SELECT id FROM tasks WHERE id LIKE ? ORDER BY id DESC LIMIT 1", (f"{prefix}%",)).fetchone()
-        if not row:
-            return f"{prefix}0001"
-        try:
-            number = int(str(row["id"]).rsplit("-", 1)[1]) + 1
-        except (IndexError, ValueError):
-            number = 1
-        return f"{prefix}{number:04d}"
+        rows = conn.execute("SELECT id FROM tasks WHERE id LIKE ?", (f"{prefix}%",)).fetchall()
+        highest = 0
+        for row in rows:
+            match = re.fullmatch(rf"{re.escape(prefix)}(\d+)", str(row["id"]))
+            if not match:
+                continue
+            highest = max(highest, int(match.group(1)))
+        return f"{prefix}{highest + 1:04d}"
 
     def row_to_task(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -242,34 +242,44 @@ class TaskStore:
                     if task:
                         self.write_active_markdown(task)
                         return {"status": "deduped", "task": task}
-            task_id = self.next_id(conn)
-            conn.execute(
-                """
-                INSERT INTO tasks (
-                  id, type, severity, status, role, summary, evidence_json, dedupe_key,
-                  created_by, claimed_by, created_at, updated_at, artifacts_json, ttl_days,
-                  parent_id, repeat_count, last_evidence_json, resolution
-                )
-                VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 1, ?, NULL)
-                """,
-                (
-                    task_id,
-                    task_type,
-                    severity,
-                    role,
-                    summary,
-                    json_dumps_compact(evidence),
-                    dedupe_key or None,
-                    created_by,
-                    timestamp,
-                    timestamp,
-                    json_dumps_compact(artifacts),
-                    ttl_days,
-                    parent_id,
-                    json_dumps_compact(evidence),
-                ),
-            )
-            conn.commit()
+            task_id = ""
+            for _ in range(25):
+                task_id = self.next_id(conn)
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO tasks (
+                          id, type, severity, status, role, summary, evidence_json, dedupe_key,
+                          created_by, claimed_by, created_at, updated_at, artifacts_json, ttl_days,
+                          parent_id, repeat_count, last_evidence_json, resolution
+                        )
+                        VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 1, ?, NULL)
+                        """,
+                        (
+                            task_id,
+                            task_type,
+                            severity,
+                            role,
+                            summary,
+                            json_dumps_compact(evidence),
+                            dedupe_key or None,
+                            created_by,
+                            timestamp,
+                            timestamp,
+                            json_dumps_compact(artifacts),
+                            ttl_days,
+                            parent_id,
+                            json_dumps_compact(evidence),
+                        ),
+                    )
+                    conn.commit()
+                    break
+                except sqlite3.IntegrityError as exc:
+                    conn.rollback()
+                    if "tasks.id" not in str(exc):
+                        raise
+            else:
+                raise RuntimeError("Could not allocate a unique task id after 25 attempts")
         task = self.get(task_id)
         if not task:
             raise RuntimeError(f"Task was not created: {task_id}")

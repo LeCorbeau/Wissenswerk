@@ -99,6 +99,35 @@ class WissenswerkCliContractTests(unittest.TestCase):
             self.assertEqual(second["task"]["repeat_count"], 2)
             self.assertTrue((Path(tmp) / "tasks" / "active" / f"{first['task']['id']}.md").exists())
 
+    def test_task_store_allocates_after_existing_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = wissenswerk.TaskStore(Path(tmp) / "tasks")
+            current_year = wissenswerk.datetime.now(wissenswerk.timezone.utc).year
+            with contextlib.closing(store.connect()) as conn:
+                for task_id in [f"TASK-{current_year}-0001", f"TASK-{current_year}-0010", f"TASK-{current_year}-notnumeric"]:
+                    conn.execute(
+                        """
+                        INSERT INTO tasks (
+                          id, type, severity, status, role, summary, evidence_json, dedupe_key,
+                          created_by, claimed_by, created_at, updated_at, artifacts_json, ttl_days,
+                          parent_id, repeat_count, last_evidence_json, resolution
+                        )
+                        VALUES (?, 'anomaly', 'low', 'completed', 'curator', 'seed', '[]', NULL,
+                                'test', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+                                '[]', 30, NULL, 1, '[]', 'seed')
+                        """,
+                        (task_id,),
+                    )
+                conn.commit()
+            created = store.raise_signal(
+                task_type="anomaly",
+                severity="medium",
+                role="curator",
+                summary="New task after existing ids",
+                created_by="test",
+            )["task"]
+            self.assertEqual(created["id"], f"TASK-{current_year}-0011")
+
     def test_task_lifecycle_removes_active_markdown_on_resolution(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = wissenswerk.TaskStore(Path(tmp) / "tasks")

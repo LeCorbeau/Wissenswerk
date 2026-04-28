@@ -130,4 +130,4 @@ The repository includes:
 
 ## License
 
-The current repository license is [MIT](LICENSE). Before the first public demo release, the project should make a deliberate release-license decision; the current release plan favors AGPL-3.0-or-later for code and CC BY-SA 4.0 for documentation/demo wiki content.
+Wissenswerk is licensed under the [MIT License](LICENSE).

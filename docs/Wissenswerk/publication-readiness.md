@@ -15,7 +15,7 @@ The repository must contain:
 - `README.md`: human overview, quick start, verification, documentation map.
 - `AGENTS.md`: platform-independent agent instructions.
 - `DESIGN.md`: UI and documentation design contract.
-- `LICENSE`: explicit release license for the public core. The current repository is MIT; the demo-release plan favors AGPL-3.0-or-later for code and CC BY-SA 4.0 for documentation/demo wiki content.
+- `LICENSE`: MIT license for the public core.
 - `CONTRIBUTING.md`: contribution flow and verification gates.
 - `CODE_OF_CONDUCT.md`: community behavior expectations.
 - `SECURITY.md`: private vulnerability reporting and secret-handling policy.
