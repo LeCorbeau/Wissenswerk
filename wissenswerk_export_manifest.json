@@ -1,0 +1,150 @@
+{
+  "schema_version": "wissenswerk-export-manifest.v1",
+  "strategy": "standalone",
+  "purpose": "Define the standalone Wissenswerk repository export without copying private corpora, generated runtime state, or tenant-specific material into the public core.",
+  "status": "public_contract",
+  "public_repo": {
+    "name": "wissenswerk",
+    "tenant_policy": "neutral_example_tenant",
+    "example_tenant_policy": "ship_anonymous_fixture_only",
+    "language_policy": "english_public_ids_localized_labels"
+  },
+  "include": {
+    "root_contracts": [
+      "AGENTS.md",
+      "DESIGN.md",
+      "README.md",
+      ".gitignore",
+      "CONTRIBUTING.md",
+      "CODE_OF_CONDUCT.md",
+      "SECURITY.md",
+      "SUPPORT.md",
+      "LICENSE",
+      "pyproject.toml",
+      "Makefile",
+      "wissenswerk.py",
+      "wissenswerk.yaml",
+      "project_manifest.json",
+      "wissenswerk_export_manifest.json"
+    ],
+    "tests": [
+      "tests/"
+    ],
+    "github": [
+      ".github/workflows/ci.yml",
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      ".github/ISSUE_TEMPLATE/bug_report.yml",
+      ".github/ISSUE_TEMPLATE/config.yml",
+      ".github/ISSUE_TEMPLATE/feature_request.yml",
+      ".github/CODEOWNERS"
+    ],
+    "documentation": [
+      "docs/Wissenswerk/",
+      "docs/architecture.md",
+      "docs/setup_rag.md"
+    ]
+  },
+  "planned_after_extraction": [
+    "src/wissenswerk/",
+    "tests/",
+    "docs/"
+  ],
+  "export_mappings": {},
+  "public_gates": [
+    {
+      "command": "python3 -m py_compile wissenswerk.py",
+      "requires_included": [
+        "wissenswerk.py"
+      ]
+    },
+    {
+      "command": "./wissenswerk.py doctor --json",
+      "requires_included": [
+        "wissenswerk.py"
+      ]
+    },
+    {
+      "command": "./wissenswerk.py export plan --strict --json",
+      "requires_included": [
+        "wissenswerk.py",
+        "wissenswerk_export_manifest.json"
+      ]
+    },
+    {
+      "command": "./wissenswerk.py test --json",
+      "requires_included": [
+        "wissenswerk.py",
+        "tests/"
+      ]
+    }
+  ],
+  "public_safety": {
+    "scan_specs": [
+      "AGENTS.md",
+      "wissenswerk.yaml",
+      "project_manifest.json",
+      ".gitignore",
+      "pyproject.toml",
+      "Makefile",
+      "SECURITY.md",
+      "SUPPORT.md",
+      "CODE_OF_CONDUCT.md",
+      ".github/workflows/ci.yml",
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      ".github/ISSUE_TEMPLATE/bug_report.yml",
+      ".github/ISSUE_TEMPLATE/config.yml",
+      ".github/ISSUE_TEMPLATE/feature_request.yml",
+      ".github/CODEOWNERS",
+      "README.md",
+      "CONTRIBUTING.md",
+      "docs/Wissenswerk/",
+      "docs/setup_rag.md",
+      "tests/"
+    ],
+    "forbidden_patterns": [
+      {
+        "pattern": "private_corpus_marker",
+        "description": "public files must not contain private corpus markers"
+      }
+    ]
+  },
+  "exclude": {
+    "runtime_or_private": [
+      ".env*",
+      "corpus/private/",
+      "docs/private/",
+      "Logs/",
+      "site/",
+      "dist/",
+      "*.sqlite",
+      "*.db",
+      "*.dump"
+    ],
+    "report_ballast": [
+      "Logs/Archive/",
+      "Logs/Batch/",
+      "Logs/Conclusions/",
+      "Logs/Github/",
+      "Logs/Ingestion/",
+      "Logs/Queues/",
+      "Logs/Reports/",
+      "Logs/Research/",
+      "Logs/Wissenswerk/",
+      "System/Archivregister/",
+      "docs/Archiv/"
+    ]
+  },
+  "report_policy": {
+    "public_repo_default": "exclude",
+    "commit_policy": "commit contracts, fixtures, source docs, and curated dossiers only",
+    "runtime_reports": "generated locally and ignored",
+    "coordination_policy": "keep local task state private; publish only curated decisions"
+  },
+  "migration_notes": [
+    "Use `./wissenswerk.py export plan --json` as the dry-run gate for publishability.",
+    "Use `./wissenswerk.py export materialize --target <dir> --apply --json` to create the candidate public repository tree.",
+    "Use `./wissenswerk.py export verify --target <dir> --json` before pushing the candidate tree.",
+    "Generate host-specific agent adapters from AGENTS.md, DESIGN.md, project_manifest.json, and tool manifests after extraction.",
+    "Treat Honcho as an optional memory adapter, not as a mandatory dependency."
+  ]
+}

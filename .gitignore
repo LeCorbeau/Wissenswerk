@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Secrets and local provider config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Wissenswerk runtime state
+.wissenswerk/
+reports/wissenswerk/
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql.gz
+
+# RagPrep and corpus-local outputs
+ragprep_output/
+ragprep_outputs/
+.ragprep/
+corpus/.ragprep/
+
+# Bot and memory caches
+bot_session/
+discord_session/
+honcho_cache/
+
+# Build and docs output
+site/
+dist/
+build/
+docs/Wiki/
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

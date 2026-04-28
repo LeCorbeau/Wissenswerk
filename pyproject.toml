@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wissenswerk"
+version = "0.2.0"
+description = "A platform-independent corpus-to-wiki knowledge compiler."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+  { name = "LeCorbeau" }
+]
+keywords = ["knowledge-base", "wiki", "rag", "agents", "markdown", "pgvector"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Documentation",
+  "Topic :: Text Processing"
+]
+dependencies = []
+
+[project.scripts]
+wissenswerk = "wissenswerk:main"
+
+[tool.setuptools]
+py-modules = ["wissenswerk"]

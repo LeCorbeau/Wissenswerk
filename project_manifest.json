@@ -1,0 +1,73 @@
+{
+  "schema_version": "wissenswerk-manifest.v1",
+  "product": "Wissenswerk",
+  "generated_from": "wissenswerk.yaml",
+  "branch_strategy": "standalone",
+  "reference_tenant": "example",
+  "compatibility": {
+    "new_cli": "./wissenswerk.py"
+  },
+  "contracts": {
+    "agent_instructions": "AGENTS.md",
+    "design_system": "DESIGN.md",
+    "tenant_config": "wissenswerk.yaml"
+  },
+  "platform_independence": {
+    "status": "required",
+    "principle": "Wissenswerk is specified through open repository contracts, CLI JSON, tool manifests, and MCP-compatible adapters. IDE-specific files are generated adapters only.",
+    "canonical_surfaces": [
+      "AGENTS.md",
+      "DESIGN.md",
+      "wissenswerk.yaml",
+      "project_manifest.json",
+      "./wissenswerk.py",
+      "./wissenswerk.py <command> --json"
+    ],
+    "host_specific_semantics_allowed": false
+  },
+  "capabilities": {
+    "setup_profile": "Create quick or guided project profiles for local-history demos and production projects.",
+    "ragprep_import": "Import pre-chunked corpora without duplicating parsing logic.",
+    "corpus_analysis": "Build corpus inventory, entity registry, claim ledger, concept graph, source coverage, and conflict candidates.",
+    "article_planning": "Prioritize article candidates before prose generation.",
+    "wiki_build": "Compile Markdown pages and per-article provenance JSON from article plans and claims.",
+    "audit_stats": "Inspect generated pages, provenance, source leaks, conflicts, and demo statistics.",
+    "demo_publish": "Run an inspectable one-command demo pipeline and prepare GitHub Pages publishing without remote side effects.",
+    "retrieval": "PostgreSQL pgvector default with OpenAI-compatible embedding endpoints.",
+    "providers": "OpenAI-compatible chat, summary, embedding, and rerank profiles.",
+    "automation": "Auto-apply wiki generation with reports, provenance, and rollback hints.",
+    "curation": "Legacy alias surface for article-planning compatibility.",
+    "doctor": "Run platform-neutral contract, provider, design, and hygiene checks.",
+    "export_plan": "Dry-run the standalone repository export manifest and report publishability warnings.",
+    "reset_wipe": "Dry-run-first reset and wipe planning for memory, indexes, generated state, wiki output, and tenant state.",
+    "signals_tasks": "Local JSON-first coordination layer for anomalies, blockers, handoffs, approvals, audit findings, and run events.",
+    "bot": "Discord adapter over the same Retriever/search interface."
+  },
+  "memory": {
+    "default": "markdown-db-hybrid",
+    "structured_state": "sqlite-or-postgres",
+    "retrieval_state": "pgvector",
+    "optional_provider": "honcho",
+    "rule": "facts come from sources, wiki, provenance, and retrieval; chat history and optional memory providers are not factual authority"
+  },
+  "localization": {
+    "public_ids_language": "en",
+    "default_locale": "en",
+    "tenant_locale_configurable": true
+  },
+  "generic_roles": [
+    "coordinator",
+    "curator",
+    "verifier",
+    "maintainer"
+  ],
+  "core_terms": [
+    "corpus",
+    "source",
+    "article",
+    "citation",
+    "conflict",
+    "curation",
+    "verification"
+  ]
+}

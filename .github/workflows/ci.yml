@@ -1,0 +1,47 @@
+name: Wissenswerk CI
+
+on:
+  push:
+    branches: ["main", "codex/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Syntax check
+        run: python -m py_compile wissenswerk.py
+
+      - name: Validate JSON contracts
+        run: |
+          python -m json.tool wissenswerk_export_manifest.json >/dev/null
+          python -m json.tool wissenswerk.yaml >/dev/null
+          python -m json.tool project_manifest.json >/dev/null
+
+      - name: Run standalone tests
+        run: ./wissenswerk.py test --json
+
+      - name: Run doctor
+        run: ./wissenswerk.py doctor --json
+
+      - name: Check public export plan
+        run: ./wissenswerk.py export plan --strict --json
+
+      - name: Check diff hygiene
+        run: git diff --check

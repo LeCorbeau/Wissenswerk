@@ -1,0 +1,151 @@
+{
+  "schema_version": "wissenswerk.config.v1",
+  "project": {
+    "name": "Example Corpus",
+    "product": "Wissenswerk",
+    "language": "en",
+    "tenant_id": "example",
+    "type": "general",
+    "description": "Neutral starter tenant for a standalone Wissenswerk installation."
+  },
+  "paths": {
+    "sources": ["corpus"],
+    "wiki": "docs/Wiki",
+    "reports": "reports/wissenswerk",
+    "ragprep_imports": ".wissenswerk/ragprep_imports",
+    "runtime_state": ".wissenswerk/state",
+    "tasks": ".wissenswerk/tasks",
+    "profile": ".wissenswerk/profile",
+    "analysis": ".wissenswerk/analysis",
+    "article_plans": ".wissenswerk/article_plans",
+    "project_docs": "docs"
+  },
+  "source_precedence": ["Primary Sources", "Derived Notes", "Wiki Pages"],
+  "localization": {
+    "default_locale": "en",
+    "available_locales": ["en"],
+    "tenant_locale": "en",
+    "public_ids_language": "en"
+  },
+  "automation": {
+    "auto_apply": true,
+    "write_reports": true,
+    "require_provenance": true,
+    "rollback_hint": true
+  },
+  "providers": {
+    "chat": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-5.2"
+    },
+    "summary": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-5.2"
+    },
+    "embedding": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "text-embedding-3-large",
+      "dimensions": 3072
+    },
+    "rerank": {
+      "kind": "openai-compatible",
+      "base_url": "http://localhost:8000/v1",
+      "api_key_env": "WISSENSWERK_RERANK_API_KEY",
+      "model": "bge-reranker-v2-m3"
+    }
+  },
+  "vector_store": {
+    "kind": "pgvector",
+    "dsn_env": "WISSENSWERK_DATABASE_URL",
+    "schema": "wissenswerk",
+    "collection": "example"
+  },
+  "ragprep": {
+    "accepted_extensions": [".json", ".jsonl"],
+    "required_fields": ["document_id", "chunk_id", "text", "source_path"],
+    "optional_fields": ["title", "section", "language", "hash", "entities", "summary", "author", "year", "page", "keywords", "archive_id", "source_url", "rights"]
+  },
+  "publication": {
+    "mode": "private-sources-public-wiki",
+    "target": "github-pages",
+    "include_source_fulltext": false,
+    "include_source_metadata": true
+  },
+  "memory": {
+    "default": "markdown-db-hybrid",
+    "facts_authority": ["sources", "wiki", "provenance", "retrieval"],
+    "structured_state": "sqlite-or-postgres",
+    "vector_memory": "pgvector",
+    "optional_providers": {
+      "honcho": {
+        "enabled": false,
+        "api_key_env": "HONCHO_API_KEY",
+        "purpose": "agent and user working memory only; never factual authority"
+      }
+    }
+  },
+  "workflows": {
+    "user_flow": ["setup", "ingest", "build", "publish"],
+    "maintainer_flow": ["doctor", "analyze", "plan articles", "audit", "stats", "report", "reset/rollback"],
+    "areas": ["project", "corpus", "wiki", "retrieval", "quality", "publish"]
+  },
+  "reset_policy": {
+    "default_mode": "dry-run",
+    "targets": ["memory", "index", "generated", "wiki"],
+    "wipe_targets": ["tenant", "all"],
+    "wipe_all_confirm_token": "WIPE-WISSENSWERK",
+    "protect_sources_by_default": true
+  },
+  "interop": {
+    "platform_independent": true,
+    "canonical_surfaces": [
+      "AGENTS.md",
+      "DESIGN.md",
+      "wissenswerk.yaml",
+      "project_manifest.json",
+      "./wissenswerk.py --help",
+      "./wissenswerk.py <command> --json",
+      "mcp_config.json"
+    ],
+    "adapter_policy": {
+      "source_of_truth": "canonical_surfaces",
+      "generated_adapter_targets": ["codex"],
+      "future_adapter_targets": ["jules", "gemini-cli", "cursor", "aider", "github-copilot", "zed"],
+      "host_specific_semantics_allowed": false
+    }
+  },
+  "agents": {
+    "roles": ["coordinator", "curator", "verifier", "maintainer"],
+    "signals": {
+      "enabled": true,
+      "store": ".wissenswerk/tasks/tasks.sqlite",
+      "active_markdown": ".wissenswerk/tasks/active",
+      "facts_authority": false,
+      "raise_only_for": ["anomaly", "blocker", "handoff", "approval", "audit_finding", "run_event"]
+    },
+    "protected_core_paths": [
+      "wissenswerk.py",
+      "project_manifest.json",
+      "DESIGN.md",
+      "AGENTS.md"
+    ],
+    "low_cost_profile": "summary"
+  },
+  "design": {
+    "contract": "DESIGN.md",
+    "lint_command": "./wissenswerk.py design lint --json"
+  },
+  "bot": {
+    "discord": {
+      "enabled": false,
+      "token_env": "DISCORD_BOT_TOKEN",
+      "command_prefix": "!ww"
+    }
+  }
+}

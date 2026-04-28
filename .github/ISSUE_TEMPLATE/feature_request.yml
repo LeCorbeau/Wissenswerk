@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a capability or workflow improvement for Wissenswerk.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or user need is blocked?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the behavior, CLI/API surface, or documentation change.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - project
+        - corpus
+        - wiki
+        - retrieval
+        - quality
+        - publish
+        - agents
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and constraints
+      description: Public export, provenance, provider, tenant, or security implications.
+    validations:
+      required: false
