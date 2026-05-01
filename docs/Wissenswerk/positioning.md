@@ -23,7 +23,7 @@ Useful reference points:
 
 ## Differentiators
 
-- RagPrep is the parsing and pre-chunking boundary.
+- RagPrep is the parsing, cleanup, and segmentation boundary.
 - Provenance, audit, and rollback reports are mandatory, not optional.
 - PostgreSQL + pgvector is the target retrieval backbone.
 - Providers are OpenAI-compatible and can be self-hosted or remote.

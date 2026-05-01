@@ -63,6 +63,7 @@ Tenant-specific display names can be localized.
 - [Retrieval and Memory](retrieval.md)
 - [Signals and Tasks](signals-tasks.md)
 - [Publication Readiness](publication-readiness.md)
+- [Demo Test Run](demo-test-run.md)
 - [Discord Bot](discord-bot.md)
 - [Agent System Integration](agent-system-hermes.md)
 - [Positioning](positioning.md)

@@ -12,7 +12,7 @@
     "sources": ["corpus"],
     "wiki": "docs/Wiki",
     "reports": "reports/wissenswerk",
-    "ragprep_imports": ".wissenswerk/ragprep_imports",
+    "corpus": ".wissenswerk/corpus",
     "runtime_state": ".wissenswerk/state",
     "tasks": ".wissenswerk/tasks",
     "profile": ".wissenswerk/profile",
@@ -68,7 +68,8 @@
   },
   "ragprep": {
     "accepted_extensions": [".json", ".jsonl"],
-    "required_fields": ["document_id", "chunk_id", "text", "source_path"],
+    "required_fields": ["document_id", "segment_id", "text"],
+    "source_locator_fields": ["source_path", "archive_id", "source_url"],
     "optional_fields": ["title", "section", "language", "hash", "entities", "summary", "author", "year", "page", "keywords", "archive_id", "source_url", "rights"]
   },
   "publication": {

@@ -13,7 +13,7 @@ class WissenswerkCliContractTests(unittest.TestCase):
         config = wissenswerk.default_config_payload()
         config["paths"]["tasks"] = str(root / "tasks")
         config["paths"]["reports"] = str(root / "reports")
-        config["paths"]["ragprep_imports"] = str(root / "imports")
+        config["paths"]["corpus"] = str(root / "corpus_state")
         config["paths"]["runtime_state"] = str(root / "state")
         config["paths"]["profile"] = str(root / "profile")
         config["paths"]["analysis"] = str(root / "analysis")
@@ -79,7 +79,7 @@ class WissenswerkCliContractTests(unittest.TestCase):
                 task_type="anomaly",
                 severity="medium",
                 role="curator",
-                summary="Duplicate chunk id",
+                summary="Duplicate segment id",
                 evidence=["fixture.json"],
                 dedupe_key="test:duplicate",
                 created_by="test",
@@ -88,7 +88,7 @@ class WissenswerkCliContractTests(unittest.TestCase):
                 task_type="anomaly",
                 severity="high",
                 role="curator",
-                summary="Duplicate chunk id again",
+                summary="Duplicate segment id again",
                 evidence=["fixture.json"],
                 dedupe_key="test:duplicate",
                 created_by="test",
@@ -182,13 +182,13 @@ class WissenswerkCliContractTests(unittest.TestCase):
             self.assertEqual(digest["status"], "ok")
             self.assertEqual(len(digest["open"]), 1)
 
-    def test_ingest_validation_raises_deduped_audit_task(self):
+    def test_ingest_missing_locator_raises_deduped_audit_task_without_hard_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = wissenswerk.default_config_payload()
             config["paths"]["tasks"] = str(root / "tasks")
             config["paths"]["reports"] = str(root / "reports")
-            config["paths"]["ragprep_imports"] = str(root / "imports")
+            config["paths"]["corpus"] = str(root / "corpus_state")
             config_path = root / "wissenswerk.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")
             ragprep = root / "ragprep"
@@ -204,11 +204,68 @@ class WissenswerkCliContractTests(unittest.TestCase):
                     code = wissenswerk.main(
                         ["--config", str(config_path), "ingest", "--from-ragprep", str(ragprep), "--apply", "--json"]
                     )
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 0)
+                payload = json.loads(out.getvalue())
+                self.assertEqual(payload["status"], "ready")
+                self.assertEqual(payload["segments_total"], 1)
+                self.assertNotIn("chunks_total", payload)
+                self.assertEqual(len(payload["metadata_findings"]), 1)
+                self.assertTrue((root / "corpus_state" / "source_documents.json").exists())
+                self.assertTrue((root / "corpus_state" / "evidence_segments.json").exists())
+                self.assertTrue((root / "corpus_state" / "import_manifest.json").exists())
             tasks = wissenswerk.TaskStore(root / "tasks").list()
             self.assertEqual(len(tasks), 1)
             self.assertEqual(tasks[0]["type"], "audit_finding")
             self.assertEqual(tasks[0]["repeat_count"], 2)
+
+    def test_ingest_missing_required_segment_field_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = wissenswerk.default_config_payload()
+            config["paths"]["tasks"] = str(root / "tasks")
+            config["paths"]["reports"] = str(root / "reports")
+            config["paths"]["corpus"] = str(root / "corpus_state")
+            config_path = root / "wissenswerk.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            ragprep = root / "ragprep"
+            ragprep.mkdir()
+            (ragprep / "bad.json").write_text(
+                json.dumps({"document_id": "doc-1", "chunk_id": "chunk-1", "source_url": "https://example.test/source"}),
+                encoding="utf-8",
+            )
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = wissenswerk.main(
+                    ["--config", str(config_path), "ingest", "--from-ragprep", str(ragprep), "--apply", "--json"]
+                )
+            self.assertEqual(code, 1)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload["status"], "fail")
+            self.assertEqual(payload["validation_findings"][0]["missing"], ["text"])
+            self.assertFalse((root / "corpus_state" / "import_manifest.json").exists())
+
+    def test_ingest_accepts_source_url_without_source_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = self.temp_config(root)
+            ragprep = root / "ragprep"
+            ragprep.mkdir()
+            (ragprep / "with_url.json").write_text(
+                json.dumps({"document_id": "doc-1", "chunk_id": "chunk-1", "text": "hello", "source_url": "https://example.test/source"}),
+                encoding="utf-8",
+            )
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = wissenswerk.main(
+                    ["--config", str(config_path), "ingest", "--from-ragprep", str(ragprep), "--apply", "--json"]
+                )
+            self.assertEqual(code, 0)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload["metadata_findings"], [])
+            self.assertEqual(payload["source_documents_written"], 1)
+            self.assertEqual(payload["evidence_segments_written"], 1)
 
     def test_demo_release_pipeline_generates_analysis_plan_wiki_and_reports(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -248,7 +305,17 @@ class WissenswerkCliContractTests(unittest.TestCase):
                 self.assertEqual(code, 0, out.getvalue())
 
             self.assertTrue((root / "profile" / "project_profile.json").exists())
+            profile = json.loads((root / "profile" / "project_profile.json").read_text(encoding="utf-8"))
+            self.assertEqual(profile["corpus"]["preview"]["source_documents"], 1)
+            self.assertEqual(profile["corpus"]["preview"]["evidence_segments"], 1)
+            self.assertTrue((root / "corpus_state" / "source_documents.json").exists())
+            self.assertTrue((root / "corpus_state" / "evidence_segments.json").exists())
+            self.assertTrue((root / "corpus_state" / "import_manifest.json").exists())
             self.assertTrue((root / "analysis" / "claims.json").exists())
+            claims = json.loads((root / "analysis" / "claims.json").read_text(encoding="utf-8"))["claims"]
+            self.assertTrue(claims)
+            self.assertIn("evidence_segment_id", claims[0])
+            self.assertNotIn("chunk_id", claims[0])
             self.assertTrue((root / "analysis" / "graph.json").exists())
             self.assertTrue((root / "article_plans" / "article_plan.json").exists())
             self.assertTrue((root / "wiki" / "Articles").exists())

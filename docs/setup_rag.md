@@ -63,26 +63,31 @@ The intended default is:
 The production implementation should:
 
 1. create schema/table migrations,
-2. store document ID, chunk ID, source path, title, section, language, hash, text, and embedding,
+2. store source document ID, evidence segment ID, source locator, title, section, language, hash, text, and embedding,
 3. support filtered search by `raw`, `wiki`, and `all`,
-4. expose scores and chunk metadata,
+4. expose scores and evidence metadata,
 5. preserve provenance links in answer output.
 
 ## RagPrep Import
 
-RagPrep is responsible for parsing, cleanup, and pre-chunking. Wissenswerk imports the artifacts:
+RagPrep is responsible for parsing, cleanup, and segmentation. Wissenswerk imports the artifacts as source documents and internal evidence segments:
 
 ```bash
 ./wissenswerk.py ingest --from-ragprep <dir> --apply --json
 ./wissenswerk.py curate --json
 ```
 
-Required chunk fields:
+Required evidence segment fields:
 
 - `document_id`
-- `chunk_id`
+- `segment_id` or RagPrep `chunk_id`
 - `text`
+
+Recommended source locator fields:
+
 - `source_path`
+- `archive_id`
+- `source_url`
 
 Optional fields:
 

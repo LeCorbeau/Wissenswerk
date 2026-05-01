@@ -41,25 +41,25 @@ RagPrep owns:
 
 - document parsing
 - cleanup
-- pre-chunking
+- segmentation for evidence and retrieval
 - optional entity extraction
-- optional chunk summaries
+- optional segment summaries
 
 Wissenswerk owns:
 
 - validating RagPrep artifacts
-- preserving document/chunk identity
+- preserving source document and evidence segment identity
 - recording provenance
 - generating curation plans
 - building wiki output
-- indexing chunks for retrieval
+- indexing evidence segments for retrieval
 
 ## Memory Model
 
 Default memory architecture is a Markdown+DB hybrid:
 
 - Markdown for human-readable decisions, session notes, dossiers, and handovers.
-- SQLite or PostgreSQL for structured runs, imports, chunk hashes, job state, and audit results.
+- SQLite or PostgreSQL for structured runs, imports, segment hashes, job state, and audit results.
 - pgvector for retrieval vectors.
 
 Optional Honcho integration is allowed for user and agent working memory:

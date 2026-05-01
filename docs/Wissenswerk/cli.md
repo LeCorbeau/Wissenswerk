@@ -19,20 +19,25 @@ category: Technical
 
 Creates or updates the project profile and setup documents. `--quick` is the home/demo path; `--guided` records the richer production shape. `init` remains available as a low-level config bootstrap.
 
-### Ingest RagPrep Artifacts
+### Ingest Source Documents
 
 ```bash
 ./wissenswerk.py ingest --from-ragprep <dir> --apply --json
 ```
 
-Imports `.json` and `.jsonl` RagPrep artifacts. Expected chunk fields:
+Imports `.json` and `.jsonl` RagPrep artifacts as source documents with internal evidence segments. Expected evidence-segment fields:
 
 - `document_id`
-- `chunk_id`
+- `segment_id` or RagPrep `chunk_id`
 - `text`
-- `source_path`
 
-Optional fields include `title`, `section`, `language`, `hash`, `entities`, `summary`, `author`, `year`, `page`, `keywords`, `archive_id`, `source_url`, and `rights`.
+At least one source locator should be present when possible: `source_path`, `archive_id`, or `source_url`. Missing locators create audit findings instead of hard-failing the import. Optional fields include `title`, `section`, `language`, `hash`, `entities`, `summary`, `author`, `year`, `page`, `keywords`, and `rights`.
+
+Applied imports write:
+
+- `.wissenswerk/corpus/source_documents.json`
+- `.wissenswerk/corpus/evidence_segments.json`
+- `.wissenswerk/corpus/import_manifest.json`
 
 ### Analyze Corpus
 

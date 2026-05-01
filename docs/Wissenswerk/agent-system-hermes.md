@@ -47,6 +47,8 @@ Host-specific skill folders are generated adapter outputs. They must not contain
 doctor -> task digest -> setup/profile -> ingest -> analyze -> plan articles -> build -> audit -> stats -> demo report -> publish pages --dry-run
 ```
 
+For the pre-publication demo run, Hermes should follow [Demo Test Run](demo-test-run.md). That runbook defines the kickoff prompt, setup artifacts, source-document import contract, analysis outputs, success criteria, and required closeout.
+
 For maintainer work:
 
 ```text

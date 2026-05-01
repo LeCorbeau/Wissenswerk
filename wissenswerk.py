@@ -426,7 +426,7 @@ def default_config_payload() -> dict[str, Any]:
             "sources": ["corpus"],
             "wiki": "docs/Wiki",
             "reports": "reports/wissenswerk",
-            "ragprep_imports": ".wissenswerk/ragprep_imports",
+            "corpus": ".wissenswerk/corpus",
             "runtime_state": ".wissenswerk/state",
             "tasks": ".wissenswerk/tasks",
             "profile": ".wissenswerk/profile",
@@ -484,7 +484,8 @@ def default_config_payload() -> dict[str, Any]:
         },
         "ragprep": {
             "accepted_extensions": [".json", ".jsonl"],
-            "required_fields": ["document_id", "chunk_id", "text", "source_path"],
+            "required_fields": ["document_id", "segment_id", "text"],
+            "source_locator_fields": ["source_path", "archive_id", "source_url"],
             "optional_fields": ["title", "section", "language", "hash", "entities", "summary", "author", "year", "page", "keywords", "archive_id", "source_url", "rights"],
         },
         "publication": {
@@ -518,6 +519,22 @@ def safe_slug(value: str, fallback: str = "project") -> str:
     return slug or fallback
 
 
+def corpus_dir(config: dict[str, Any]) -> Path:
+    return repo_path(config.get("paths", {}).get("corpus", ".wissenswerk/corpus"))
+
+
+def has_source_locator(segment: dict[str, Any]) -> bool:
+    return bool(segment.get("source_path") or segment.get("archive_id") or segment.get("source_url"))
+
+
+def source_document_id(segment: dict[str, Any]) -> str:
+    return str(segment.get("source_document_id") or segment.get("document_id") or "")
+
+
+def evidence_segment_id(segment: dict[str, Any]) -> str:
+    return str(segment.get("evidence_segment_id") or segment.get("segment_id") or segment.get("chunk_id") or "")
+
+
 def profile_payload(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
     project_name = args.project_name or config.get("project", {}).get("name") or "Example Corpus"
     project_type = args.profile or config.get("project", {}).get("type") or "local-history"
@@ -538,7 +555,14 @@ def profile_payload(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         },
         "corpus": {
             "ragprep_input": args.from_ragprep or "",
-            "expected_shape": "prepared RagPrep JSON/JSONL chunks",
+            "expected_shape": "source documents with RagPrep evidence segments in JSON/JSONL",
+            "import_contract": {
+        "source_documents": "Human-facing source works such as books, PDFs, OCR Markdown, articles, or archival records.",
+                "evidence_segments": "Technical RagPrep sections used for evidence, provenance, and retrieval.",
+                "source_archive": "Private or public source archive referenced by source_path, archive_id, or source_url.",
+                "publication_policy": publication_mode,
+            },
+            "preview": {},
         },
         "publication": {
             "mode": publication_mode,
@@ -596,6 +620,13 @@ def write_project_profile_docs(config: dict[str, Any], profile: dict[str, Any]) 
                 f"- Output language: {project['output_language']}",
                 f"- Source languages: {', '.join(project['source_languages']) or '[unknown]'}",
                 f"- Publication mode: {publication['mode']}",
+                f"- Corpus import path: {profile.get('corpus', {}).get('ragprep_input') or '[not configured]'}",
+                "",
+                "## Corpus Preview",
+                "",
+                f"- Source documents: {profile.get('corpus', {}).get('preview', {}).get('source_documents', 0)}",
+                f"- Evidence segments: {profile.get('corpus', {}).get('preview', {}).get('evidence_segments', 0)}",
+                f"- Source locator coverage: {profile.get('corpus', {}).get('preview', {}).get('source_locator_coverage', '[not scanned]')}",
                 "",
                 "## Agent Workflow",
                 "",
@@ -643,6 +674,9 @@ def command_setup(args: argparse.Namespace) -> int:
     config_path = repo_path(args.config)
     config = load_config(config_path) if config_path.exists() else default_config_payload()
     profile = profile_payload(args, config)
+    if profile["corpus"]["ragprep_input"]:
+        preview = discover_corpus_preview(repo_path(profile["corpus"]["ragprep_input"]), profile["project"]["output_language"])
+        profile["corpus"]["preview"] = preview
     config["project"]["name"] = profile["project"]["name"]
     config["project"]["type"] = profile["project"]["type"]
     config["project"]["tenant_id"] = profile["project"]["tenant_id"]
@@ -1038,7 +1072,11 @@ def iter_ragprep_records(import_dir: Path) -> list[dict[str, Any]]:
             continue
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         items: list[Any]
-        if isinstance(payload, dict) and isinstance(payload.get("chunks"), list):
+        if isinstance(payload, dict) and isinstance(payload.get("evidence_segments"), list):
+            items = payload["evidence_segments"]
+        elif isinstance(payload, dict) and isinstance(payload.get("segments"), list):
+            items = payload["segments"]
+        elif isinstance(payload, dict) and isinstance(payload.get("chunks"), list):
             items = payload["chunks"]
         elif isinstance(payload, list):
             items = payload
@@ -1053,18 +1091,21 @@ def iter_ragprep_records(import_dir: Path) -> list[dict[str, Any]]:
     return records
 
 
-def normalize_chunk(record: dict[str, Any], default_language: str) -> dict[str, Any]:
+def normalize_evidence_segment(record: dict[str, Any], default_language: str) -> dict[str, Any]:
     text = str(record.get("text") or record.get("content") or record.get("chunk_text") or "")
     source_path = str(record.get("source_path") or record.get("path") or record.get("source") or "")
-    document_id = str(record.get("document_id") or record.get("doc_id") or source_path or record.get("_ragprep_file", ""))
-    chunk_seed = str(record.get("chunk_id") or record.get("id") or hashlib.sha1(text.encode("utf-8")).hexdigest()[:16])
-    chunk_id = str(chunk_seed)
+    title = str(record.get("title") or Path(source_path).stem or record.get("document_title") or "")
+    document_id = str(record.get("document_id") or record.get("source_document_id") or record.get("doc_id") or source_path or title or record.get("_ragprep_file", ""))
+    segment_seed = str(record.get("segment_id") or record.get("evidence_segment_id") or record.get("chunk_id") or record.get("id") or hashlib.sha1(text.encode("utf-8")).hexdigest()[:16])
+    segment_id = str(segment_seed)
     return {
+        "source_document_id": document_id,
         "document_id": document_id,
-        "chunk_id": chunk_id,
+        "evidence_segment_id": segment_id,
+        "segment_id": segment_id,
         "text": text,
         "source_path": source_path,
-        "title": str(record.get("title") or Path(source_path).stem or document_id),
+        "title": title or document_id,
         "section": str(record.get("section") or record.get("heading") or ""),
         "language": str(record.get("language") or default_language),
         "hash": str(record.get("hash") or hashlib.sha256(text.encode("utf-8")).hexdigest()),
@@ -1081,13 +1122,108 @@ def normalize_chunk(record: dict[str, Any], default_language: str) -> dict[str, 
     }
 
 
-def validate_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    findings = []
-    for index, chunk in enumerate(chunks):
-        missing = [field for field in ("document_id", "chunk_id", "text", "source_path") if not chunk.get(field)]
+def validate_evidence_segments(segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    validation_findings = []
+    metadata_findings = []
+    for index, segment in enumerate(segments):
+        missing = []
+        if not source_document_id(segment):
+            missing.append("source_document_id")
+        if not evidence_segment_id(segment):
+            missing.append("segment_id")
+        if not segment.get("text"):
+            missing.append("text")
         if missing:
-            findings.append({"index": index, "chunk_id": chunk.get("chunk_id", ""), "missing": missing})
-    return findings
+            validation_findings.append(
+                {
+                    "index": index,
+                    "source_document_id": source_document_id(segment),
+                    "document_id": str(segment.get("document_id") or ""),
+                    "segment_id": evidence_segment_id(segment),
+                    "missing": missing,
+                }
+            )
+        if not has_source_locator(segment):
+            metadata_findings.append(
+                {
+                    "index": index,
+                    "source_document_id": source_document_id(segment),
+                    "document_id": str(segment.get("document_id") or ""),
+                    "segment_id": evidence_segment_id(segment),
+                    "missing": ["source_path|archive_id|source_url"],
+                    "severity": "medium",
+                    "message": "Evidence segment has no source locator. Ingest can continue, but publication/source review is required.",
+                }
+            )
+    return validation_findings, metadata_findings
+
+
+def source_documents_from_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    documents: dict[str, dict[str, Any]] = {}
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        doc_id = source_document_id(segment) or "unknown"
+        doc = documents.setdefault(
+            doc_id,
+            {
+                "source_document_id": doc_id,
+                "document_id": doc_id,
+                "title": str(segment.get("title") or doc_id),
+                "author": str(segment.get("author") or ""),
+                "year": str(segment.get("year") or ""),
+                "language": str(segment.get("language") or ""),
+                "source_path": str(segment.get("source_path") or ""),
+                "archive_id": str(segment.get("archive_id") or ""),
+                "source_url": str(segment.get("source_url") or ""),
+                "rights": str(segment.get("rights") or ""),
+                "segments": 0,
+                "sections": set(),
+                "metadata_quality": "complete",
+            },
+        )
+        doc["segments"] += 1
+        for field in ("title", "author", "year", "language", "source_path", "archive_id", "source_url", "rights"):
+            if not doc.get(field) and segment.get(field):
+                doc[field] = str(segment.get(field) or "")
+        if segment.get("section"):
+            doc["sections"].add(str(segment["section"]))
+    normalized: list[dict[str, Any]] = []
+    for doc in documents.values():
+        doc["sections"] = sorted(doc["sections"])
+        if not (doc.get("source_path") or doc.get("archive_id") or doc.get("source_url")):
+            doc["metadata_quality"] = "missing_source_locator"
+        elif not doc.get("author") or not doc.get("year") or not doc.get("rights"):
+            doc["metadata_quality"] = "partial"
+        normalized.append(doc)
+    return sorted(normalized, key=lambda item: str(item.get("title", "")).lower())
+
+
+def corpus_preview_from_segments(segments: list[dict[str, Any]]) -> dict[str, Any]:
+    source_documents = source_documents_from_segments(segments)
+    located_documents = sum(1 for doc in source_documents if doc.get("source_path") or doc.get("archive_id") or doc.get("source_url"))
+    validation_findings, metadata_findings = validate_evidence_segments(segments)
+    return {
+        "source_documents": len(source_documents),
+        "evidence_segments": len(segments),
+        "source_locator_coverage": f"{located_documents}/{len(source_documents)}" if source_documents else "0/0",
+        "metadata_findings": len(metadata_findings),
+        "validation_findings": len(validation_findings),
+        "languages": sorted({str(segment.get("language") or "") for segment in segments if isinstance(segment, dict) and segment.get("language")}),
+        "recommended_next_commands": [
+            "./wissenswerk.py ingest --from-ragprep <dir> --apply --json",
+            "./wissenswerk.py analyze --apply --json",
+            "./wissenswerk.py plan articles --apply --json",
+        ],
+    }
+
+
+def discover_corpus_preview(import_dir: Path, default_language: str) -> dict[str, Any]:
+    if not import_dir.exists():
+        return {"status": "missing", "path": rel(import_dir), "source_documents": 0, "evidence_segments": 0}
+    records = iter_ragprep_records(import_dir)
+    segments = [normalize_evidence_segment(record, default_language) for record in records]
+    return {"status": "scanned", "path": rel(import_dir), **corpus_preview_from_segments(segments)}
 
 
 def command_ingest(args: argparse.Namespace) -> int:
@@ -1100,53 +1236,98 @@ def command_ingest(args: argparse.Namespace) -> int:
         return 2
     raw_records = iter_ragprep_records(import_dir)
     progress(f"ingest: loaded {len(raw_records)} raw record(s)")
-    chunks = [normalize_chunk(record, config.get("project", {}).get("language", "de")) for record in raw_records]
-    findings = validate_chunks(chunks)
-    progress(f"ingest: normalized {len(chunks)} chunk(s); validation findings={len(findings)}")
+    segments = [normalize_evidence_segment(record, config.get("project", {}).get("language", "de")) for record in raw_records]
+    source_documents = source_documents_from_segments(segments)
+    validation_findings, metadata_findings = validate_evidence_segments(segments)
+    progress(f"ingest: discovered {len(source_documents)} source document(s)")
+    progress(f"ingest: normalized {len(segments)} evidence segment(s); validation findings={len(validation_findings)}; metadata findings={len(metadata_findings)}")
     task_events = []
-    if findings:
+    if validation_findings:
         store = default_task_store(config)
-        for finding in findings:
+        for finding in validation_findings:
             missing = ",".join(finding.get("missing", []))
-            chunk_id = str(finding.get("chunk_id") or f"index-{finding.get('index', 0)}")
+            segment_id = str(finding.get("segment_id") or finding.get("chunk_id") or f"index-{finding.get('index', 0)}")
             result = store.raise_signal(
                 task_type="audit_finding",
                 severity="high",
                 role="curator",
-                summary=f"RagPrep chunk {chunk_id} is missing required field(s): {missing}",
+                summary=f"Evidence segment {segment_id} is missing required field(s): {missing}",
                 evidence=[rel(import_dir)],
-                dedupe_key=f"ragprep:missing-required:{chunk_id}:{missing}",
+                dedupe_key=f"ragprep:missing-required:{segment_id}:{missing}",
                 created_by="ingest",
             )
             task_events.append({"trigger": "ragprep_validation", **result})
-    status = "fail" if findings else "ready"
+    if metadata_findings:
+        store = default_task_store(config)
+        for finding in metadata_findings:
+            segment_id = str(finding.get("segment_id") or finding.get("chunk_id") or f"index-{finding.get('index', 0)}")
+            result = store.raise_signal(
+                task_type="audit_finding",
+                severity="medium",
+                role="verifier",
+                summary=f"Evidence segment {segment_id} has no source locator.",
+                evidence=[rel(import_dir)],
+                dedupe_key=f"ragprep:missing-source-locator:{segment_id}",
+                created_by="ingest",
+            )
+            task_events.append({"trigger": "source_locator_metadata", **result})
+    status = "fail" if validation_findings else "ready"
     payload = {
         "status": status,
         "mode": "auto-apply" if args.apply else "dry-run",
         "source": rel(import_dir),
-        "chunks_total": len(chunks),
-        "documents_total": len({chunk["document_id"] for chunk in chunks if chunk.get("document_id")}),
-        "validation_findings": findings,
+        "documents_total": len(source_documents),
+        "segments_total": len(segments),
+        "source_documents_written": 0,
+        "evidence_segments_written": 0,
+        "metadata_findings": metadata_findings,
+        "validation_findings": validation_findings,
         "vector_store": config.get("vector_store", {}),
         "tasks": task_events,
         "report_path": "",
         "written": [],
     }
-    if args.apply and not findings:
-        state_dir = repo_path(config.get("paths", {}).get("ragprep_imports", ".wissenswerk/ragprep_imports"))
-        ensure_dir(state_dir)
-        state_path = state_dir / f"ragprep_import_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.json"
-        progress(f"ingest: writing import state to {rel(state_path)}")
-        state_path.write_text(json.dumps({"generated_at": now_iso(), "chunks": chunks}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        payload["written"].append(rel(state_path))
+    if args.apply and not validation_findings:
+        corpus_state_dir = corpus_dir(config)
+        ensure_dir(corpus_state_dir)
+        source_documents_path = corpus_state_dir / "source_documents.json"
+        evidence_segments_path = corpus_state_dir / "evidence_segments.json"
+        import_manifest_path = corpus_state_dir / "import_manifest.json"
+        generated_at = now_iso()
+        progress(f"ingest: writing source document registry to {rel(source_documents_path)}")
+        write_json(source_documents_path, {"schema_version": "wissenswerk.source-documents.v1", "generated_at": generated_at, "source_documents": source_documents})
+        progress(f"ingest: writing evidence segments to {rel(evidence_segments_path)}")
+        write_json(evidence_segments_path, {"schema_version": "wissenswerk.evidence-segments.v1", "generated_at": generated_at, "evidence_segments": segments})
+        write_json(
+            import_manifest_path,
+            {
+                "schema_version": "wissenswerk.import-manifest.v1",
+                "generated_at": generated_at,
+                "source": rel(import_dir),
+                "source_documents_path": rel(source_documents_path),
+                "evidence_segments_path": rel(evidence_segments_path),
+                "documents_total": len(source_documents),
+                "segments_total": len(segments),
+                "metadata_findings": metadata_findings,
+            },
+        )
+        payload["source_documents_written"] = len(source_documents)
+        payload["evidence_segments_written"] = len(segments)
+        payload["written"].extend([rel(source_documents_path), rel(evidence_segments_path), rel(import_manifest_path)])
     report_path = write_report(config, "ragprep_ingest", payload)
     progress(f"ingest: wrote report {rel(report_path)}")
     payload["report_path"] = rel(report_path)
-    json_print(payload) if args.json else print(f"{status}: {len(chunks)} chunks; report {rel(report_path)}")
-    return 1 if findings else 0
+    json_print(payload) if args.json else print(f"{status}: {len(source_documents)} source documents, {len(segments)} evidence segments; report {rel(report_path)}")
+    return 1 if validation_findings else 0
 
 
 def latest_import_state(config: dict[str, Any]) -> tuple[Path | None, list[dict[str, Any]]]:
+    import_manifest = corpus_dir(config) / "import_manifest.json"
+    evidence_segments = corpus_dir(config) / "evidence_segments.json"
+    if import_manifest.exists() and evidence_segments.exists():
+        payload = json.loads(evidence_segments.read_text(encoding="utf-8"))
+        segments = payload.get("evidence_segments") or payload.get("segments") or payload.get("chunks") or []
+        return import_manifest, segments if isinstance(segments, list) else []
     state_dir = repo_path(config.get("paths", {}).get("ragprep_imports", ".wissenswerk/ragprep_imports"))
     if not state_dir.exists():
         return None, []
@@ -1155,8 +1336,8 @@ def latest_import_state(config: dict[str, Any]) -> tuple[Path | None, list[dict[
         return None, []
     latest = imports[-1]
     payload = json.loads(latest.read_text(encoding="utf-8"))
-    chunks = payload.get("chunks", [])
-    return latest, chunks if isinstance(chunks, list) else []
+    segments = payload.get("evidence_segments") or payload.get("segments") or payload.get("chunks") or []
+    return latest, segments if isinstance(segments, list) else []
 
 
 def analysis_dir(config: dict[str, Any]) -> Path:
@@ -1208,67 +1389,71 @@ def extract_terms(text: str) -> list[str]:
     return terms
 
 
-def chunk_entities(chunk: dict[str, Any]) -> list[str]:
-    entities = listify(chunk.get("entities"))
+def segment_entities(segment: dict[str, Any]) -> list[str]:
+    entities = listify(segment.get("entities"))
     if entities:
         return entities
-    keywords = listify(chunk.get("keywords"))
+    keywords = listify(segment.get("keywords"))
     if keywords:
         return keywords[:12]
-    return extract_terms(str(chunk.get("title", "")) + " " + str(chunk.get("text", "")))
+    return extract_terms(str(segment.get("title", "")) + " " + str(segment.get("text", "")))
 
 
-def public_source_ref(chunk: dict[str, Any]) -> dict[str, str]:
-    source_path = str(chunk.get("source_path") or "")
+def public_source_ref(segment: dict[str, Any]) -> dict[str, str]:
+    source_path = str(segment.get("source_path") or "")
     return {
-        "document_id": str(chunk.get("document_id") or ""),
-        "chunk_id": str(chunk.get("chunk_id") or ""),
-        "title": str(chunk.get("title") or Path(source_path).stem or chunk.get("document_id") or ""),
-        "author": str(chunk.get("author") or ""),
-        "year": str(chunk.get("year") or ""),
-        "page": str(chunk.get("page") or ""),
-        "archive_id": str(chunk.get("archive_id") or ""),
-        "source_url": str(chunk.get("source_url") or ""),
-        "source_label": Path(source_path).name if source_path else str(chunk.get("document_id") or ""),
-        "language": str(chunk.get("language") or ""),
-        "rights": str(chunk.get("rights") or ""),
+        "source_document_id": source_document_id(segment),
+        "document_id": str(segment.get("document_id") or source_document_id(segment)),
+        "evidence_segment_id": evidence_segment_id(segment),
+        "segment_id": evidence_segment_id(segment),
+        "title": str(segment.get("title") or Path(source_path).stem or segment.get("document_id") or ""),
+        "author": str(segment.get("author") or ""),
+        "year": str(segment.get("year") or ""),
+        "page": str(segment.get("page") or ""),
+        "archive_id": str(segment.get("archive_id") or ""),
+        "source_url": str(segment.get("source_url") or ""),
+        "source_label": Path(source_path).name if source_path else str(segment.get("document_id") or ""),
+        "language": str(segment.get("language") or ""),
+        "rights": str(segment.get("rights") or ""),
     }
 
 
-def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], state_path: Path | None) -> dict[str, Any]:
+def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]], state_path: Path | None) -> dict[str, Any]:
     documents: dict[str, dict[str, Any]] = {}
     entities: dict[str, dict[str, Any]] = {}
     claims: list[dict[str, Any]] = []
     edges: list[dict[str, str]] = []
     language_counts: dict[str, int] = {}
     optional_missing: dict[str, int] = {}
-    required_findings = validate_chunks(chunks)
+    required_findings, metadata_findings = validate_evidence_segments(segments)
     optional_fields = config.get("ragprep", {}).get("optional_fields", [])
-    for chunk_index, chunk in enumerate(chunks, start=1):
-        if not isinstance(chunk, dict):
+    for segment_index, segment in enumerate(segments, start=1):
+        if not isinstance(segment, dict):
             continue
-        document_id = str(chunk.get("document_id") or "unknown")
-        title = str(chunk.get("title") or document_id)
-        language = str(chunk.get("language") or config.get("project", {}).get("language", ""))
+        document_id = source_document_id(segment) or "unknown"
+        segment_id = evidence_segment_id(segment)
+        title = str(segment.get("title") or document_id)
+        language = str(segment.get("language") or config.get("project", {}).get("language", ""))
         language_counts[language] = language_counts.get(language, 0) + 1
         doc = documents.setdefault(
             document_id,
             {
                 "document_id": document_id,
+                "source_document_id": document_id,
                 "title": title,
                 "language": language,
-                "chunks": 0,
-                "source": public_source_ref(chunk),
+                "segments": 0,
+                "source": public_source_ref(segment),
                 "sections": set(),
             },
         )
-        doc["chunks"] += 1
-        if chunk.get("section"):
-            doc["sections"].add(str(chunk["section"]))
+        doc["segments"] += 1
+        if segment.get("section"):
+            doc["sections"].add(str(segment["section"]))
         for field in optional_fields:
-            if not chunk.get(field):
+            if not segment.get(field):
                 optional_missing[field] = optional_missing.get(field, 0) + 1
-        names = chunk_entities(chunk)
+        names = segment_entities(segment)
         for name in names:
             key = name.casefold()
             entity = entities.setdefault(
@@ -1278,13 +1463,13 @@ def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], 
                     "name": name,
                     "mentions": 0,
                     "documents": set(),
-                    "chunks": set(),
+                    "segments": set(),
                     "languages": set(),
                 },
             )
             entity["mentions"] += 1
             entity["documents"].add(document_id)
-            entity["chunks"].add(str(chunk.get("chunk_id") or ""))
+            entity["segments"].add(segment_id)
             if language:
                 entity["languages"].add(language)
             claim_id = f"CLAIM-{len(claims) + 1:06d}"
@@ -1295,15 +1480,17 @@ def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], 
                     "predicate": "mentioned_in",
                     "object": title,
                     "source_document_id": document_id,
-                    "chunk_id": str(chunk.get("chunk_id") or ""),
+                    "document_id": document_id,
+                    "evidence_segment_id": segment_id,
+                    "segment_id": segment_id,
                     "language": language,
-                    "confidence": 0.72 if chunk.get("entities") else 0.55,
+                    "confidence": 0.72 if segment.get("entities") else 0.55,
                     "quote_policy": "short-or-none",
                     "status": "candidate",
                 }
             )
             edges.append({"source": name, "target": title, "type": "mentioned_in"})
-        years = sorted(set(re.findall(r"\b(1[0-9]{3}|20[0-9]{2})\b", str(chunk.get("text", "")))))
+        years = sorted(set(re.findall(r"\b(1[0-9]{3}|20[0-9]{2})\b", str(segment.get("text", "")))))
         for year in years[:8]:
             claims.append(
                 {
@@ -1312,7 +1499,9 @@ def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], 
                     "predicate": "mentions_year",
                     "object": year,
                     "source_document_id": document_id,
-                    "chunk_id": str(chunk.get("chunk_id") or ""),
+                    "document_id": document_id,
+                    "evidence_segment_id": segment_id,
+                    "segment_id": segment_id,
                     "language": language,
                     "confidence": 0.65,
                     "quote_policy": "short-or-none",
@@ -1327,7 +1516,7 @@ def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], 
     normalized_entities = []
     for entity in entities.values():
         entity["documents"] = sorted(entity["documents"])
-        entity["chunks"] = sorted(item for item in entity["chunks"] if item)
+        entity["segments"] = sorted(item for item in entity["segments"] if item)
         entity["languages"] = sorted(entity["languages"])
         normalized_entities.append(entity)
     conflicts = []
@@ -1352,7 +1541,7 @@ def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], 
         "source_import": rel(state_path) if state_path else "",
         "project": config.get("project", {}),
         "corpus_inventory": {
-            "chunks_total": len(chunks),
+            "segments_total": len(segments),
             "documents_total": len(normalized_docs),
             "languages": language_counts,
             "documents": sorted(normalized_docs, key=lambda item: item["title"].lower()),
@@ -1361,12 +1550,15 @@ def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], 
         "claims": claims,
         "concept_graph": {
             "nodes": [{"id": entity["name"], "type": "entity"} for entity in normalized_entities]
-            + [{"id": doc["title"], "type": "document"} for doc in normalized_docs],
-            "edges": edges,
+            + [{"id": doc["title"], "type": "source_document"} for doc in normalized_docs]
+            + [{"id": claim["id"], "type": "claim"} for claim in claims],
+            "edges": edges
+            + [{"source": claim["id"], "target": claim.get("evidence_segment_id", ""), "type": "supported_by"} for claim in claims if claim.get("evidence_segment_id")],
         },
         "source_coverage": {
             "documents_with_source_ref": sum(1 for doc in normalized_docs if doc["source"].get("source_label") or doc["source"].get("source_url") or doc["source"].get("archive_id")),
-            "chunks_with_hash": sum(1 for chunk in chunks if isinstance(chunk, dict) and chunk.get("hash")),
+            "segments_with_hash": sum(1 for segment in segments if isinstance(segment, dict) and segment.get("hash")),
+            "metadata_findings": metadata_findings,
             "optional_missing": optional_missing,
         },
         "conflict_candidates": conflicts,
@@ -1376,26 +1568,26 @@ def build_corpus_analysis(config: dict[str, Any], chunks: list[dict[str, Any]], 
 
 def command_analyze(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
-    state_path, chunks = latest_import_state(config)
+    state_path, segments = latest_import_state(config)
     progress(f"analyze: reading import state {rel(state_path) if state_path else '[missing]'}")
-    analysis = build_corpus_analysis(config, chunks, state_path)
+    analysis = build_corpus_analysis(config, segments, state_path)
     progress(
         "analyze: built inventory "
         f"documents={analysis['corpus_inventory']['documents_total']} "
-        f"chunks={analysis['corpus_inventory']['chunks_total']} "
+        f"segments={analysis['corpus_inventory'].get('segments_total', 0)} "
         f"entities={len(analysis['entities'])} claims={len(analysis['claims'])}"
     )
     task_events = []
     for finding in analysis["validation_findings"]:
         missing = ",".join(finding.get("missing", []))
-        chunk_id = str(finding.get("chunk_id") or f"index-{finding.get('index', 0)}")
+        segment_id = str(finding.get("segment_id") or finding.get("chunk_id") or f"index-{finding.get('index', 0)}")
         result = default_task_store(config).raise_signal(
             task_type="audit_finding",
             severity="high",
             role="curator",
-            summary=f"Analysis found RagPrep chunk {chunk_id} missing required field(s): {missing}",
+            summary=f"Analysis found evidence segment {segment_id} missing required field(s): {missing}",
             evidence=[analysis.get("source_import", "")],
-            dedupe_key=f"analyze:missing-required:{chunk_id}:{missing}",
+            dedupe_key=f"analyze:missing-required:{segment_id}:{missing}",
             created_by="analyze",
         )
         task_events.append({"trigger": "analysis_validation", **result})
@@ -1411,7 +1603,7 @@ def command_analyze(args: argparse.Namespace) -> int:
         )
         task_events.append({"trigger": "conflict_candidate", **result})
     payload = {
-        "status": "ready" if chunks else "empty",
+        "status": "ready" if segments else "empty",
         "mode": "auto-apply" if args.apply else "dry-run",
         "analysis": analysis,
         "tasks": task_events,
@@ -1529,8 +1721,8 @@ def command_plan_articles(args: argparse.Namespace) -> int:
     analysis = latest_analysis(config)
     if not analysis:
         progress("plan articles: no saved analysis found; building analysis in memory")
-        state_path, chunks = latest_import_state(config)
-        analysis = build_corpus_analysis(config, chunks, state_path)
+        state_path, segments = latest_import_state(config)
+        analysis = build_corpus_analysis(config, segments, state_path)
     else:
         progress("plan articles: using saved analysis artifacts")
     plan = build_article_plan(config, analysis)
@@ -1557,34 +1749,35 @@ def command_plan_articles(args: argparse.Namespace) -> int:
 
 def command_curate(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
-    state_path, chunks = latest_import_state(config)
+    state_path, segments = latest_import_state(config)
     documents: dict[str, dict[str, Any]] = {}
-    duplicate_chunk_ids: set[str] = set()
-    seen_chunk_ids: set[str] = set()
-    for chunk in chunks:
-        if not isinstance(chunk, dict):
+    duplicate_segment_ids: set[str] = set()
+    seen_segment_ids: set[str] = set()
+    for segment in segments:
+        if not isinstance(segment, dict):
             continue
-        chunk_id = str(chunk.get("chunk_id", ""))
-        if chunk_id in seen_chunk_ids:
-            duplicate_chunk_ids.add(chunk_id)
-        seen_chunk_ids.add(chunk_id)
-        document_id = str(chunk.get("document_id") or chunk.get("source_path") or "unknown")
+        segment_id = evidence_segment_id(segment)
+        if segment_id in seen_segment_ids:
+            duplicate_segment_ids.add(segment_id)
+        seen_segment_ids.add(segment_id)
+        document_id = source_document_id(segment) or str(segment.get("source_path") or "unknown")
         doc = documents.setdefault(
             document_id,
             {
                 "document_id": document_id,
-                "title": str(chunk.get("title") or Path(str(chunk.get("source_path", ""))).stem or document_id),
-                "source_path": str(chunk.get("source_path", "")),
-                "language": str(chunk.get("language") or config.get("project", {}).get("language", "")),
-                "chunks": 0,
+                "source_document_id": document_id,
+                "title": str(segment.get("title") or Path(str(segment.get("source_path", ""))).stem or document_id),
+                "source_path": str(segment.get("source_path", "")),
+                "language": str(segment.get("language") or config.get("project", {}).get("language", "")),
+                "segments": 0,
                 "sections": set(),
                 "summaries": 0,
             },
         )
-        doc["chunks"] += 1
-        if chunk.get("section"):
-            doc["sections"].add(str(chunk["section"]))
-        if chunk.get("summary"):
+        doc["segments"] += 1
+        if segment.get("section"):
+            doc["sections"].add(str(segment["section"]))
+        if segment.get("summary"):
             doc["summaries"] += 1
 
     article_candidates = []
@@ -1594,34 +1787,34 @@ def command_curate(args: argparse.Namespace) -> int:
             {
                 **doc,
                 "sections": sections,
-                "readiness": "ready" if doc["chunks"] and doc["source_path"] else "needs_source",
-                "recommended_action": "build" if doc["chunks"] else "inspect source",
+                "readiness": "ready" if doc["segments"] and doc["source_path"] else "needs_source",
+                "recommended_action": "build" if doc["segments"] else "inspect source",
             }
         )
     task_events = []
-    if duplicate_chunk_ids:
+    if duplicate_segment_ids:
         store = default_task_store(config)
-        for chunk_id in sorted(duplicate_chunk_ids):
+        for segment_id in sorted(duplicate_segment_ids):
             result = store.raise_signal(
                 task_type="anomaly",
                 severity="medium",
                 role="curator",
-                summary=f"Duplicate RagPrep chunk id detected during curation: {chunk_id}",
+                summary=f"Duplicate evidence segment id detected during curation: {segment_id}",
                 evidence=[rel(state_path) if state_path else ""],
-                dedupe_key=f"curate:duplicate-chunk:{chunk_id}",
+                dedupe_key=f"curate:duplicate-segment:{segment_id}",
                 created_by="curate",
             )
-            task_events.append({"trigger": "duplicate_chunk_id", **result})
+            task_events.append({"trigger": "duplicate_segment_id", **result})
     payload = {
-        "status": "ready" if chunks else "empty",
+        "status": "ready" if segments else "empty",
         "source_import": rel(state_path) if state_path else "",
         "workflow": "curate",
-        "chunks_total": len(chunks),
+        "segments_total": len(segments),
         "documents_total": len(article_candidates),
         "article_candidates": article_candidates,
         "conflicts": {
-            "duplicate_chunk_ids": sorted(duplicate_chunk_ids),
-            "missing_summaries": sum(1 for chunk in chunks if isinstance(chunk, dict) and not chunk.get("summary")),
+            "duplicate_segment_ids": sorted(duplicate_segment_ids),
+            "missing_summaries": sum(1 for segment in segments if isinstance(segment, dict) and not segment.get("summary")),
         },
         "tasks": task_events,
         "next_commands": [
@@ -1641,7 +1834,7 @@ def command_curate(args: argparse.Namespace) -> int:
 def print_curate(payload: dict[str, Any]) -> None:
     print(f"Wissenswerk curate: {payload['status']} ({payload['documents_total']} article candidates)")
     for candidate in payload["article_candidates"][:10]:
-        print(f"- {candidate['title']} chunks={candidate['chunks']} readiness={candidate['readiness']}")
+        print(f"- {candidate['title']} segments={candidate.get('segments', 0)} readiness={candidate['readiness']}")
 
 
 def slugify_title(value: str, fallback: str) -> str:
@@ -1666,16 +1859,18 @@ def claims_for_candidate(candidate: dict[str, Any], analysis: dict[str, Any]) ->
     return claims[:5]
 
 
-def source_refs_for_claims(claims: list[dict[str, Any]], chunks: list[dict[str, Any]]) -> list[dict[str, str]]:
-    by_chunk = {str(chunk.get("chunk_id", "")): chunk for chunk in chunks if isinstance(chunk, dict)}
+def source_refs_for_claims(claims: list[dict[str, Any]], segments: list[dict[str, Any]]) -> list[dict[str, str]]:
+    by_segment = {evidence_segment_id(segment): segment for segment in segments if isinstance(segment, dict)}
+    legacy_by_chunk = {str(segment.get("chunk_id", "")): segment for segment in segments if isinstance(segment, dict)}
     refs: list[dict[str, str]] = []
     seen: set[str] = set()
     for claim in claims:
-        chunk = by_chunk.get(str(claim.get("chunk_id", "")))
-        if not chunk:
+        segment_key = str(claim.get("evidence_segment_id") or claim.get("segment_id") or "")
+        segment = by_segment.get(segment_key) or legacy_by_chunk.get(str(claim.get("chunk_id", "")))
+        if not segment:
             continue
-        ref = public_source_ref(chunk)
-        key = ref.get("chunk_id") or ref.get("document_id")
+        ref = public_source_ref(segment)
+        key = ref.get("segment_id") or ref.get("chunk_id") or ref.get("document_id")
         if key and key not in seen:
             refs.append(ref)
             seen.add(key)
@@ -1695,8 +1890,8 @@ def format_source_ref(ref: dict[str, str]) -> str:
         extras.append(f"archive `{ref['archive_id']}`")
     if ref.get("source_url"):
         extras.append(ref["source_url"])
-    if ref.get("chunk_id"):
-        extras.append(f"chunk `{ref['chunk_id']}`")
+    if ref.get("segment_id"):
+        extras.append(f"segment `{ref['segment_id']}`")
     suffix = f" ({'; '.join(extras)})" if extras else ""
     return f"- {label}{suffix}"
 
@@ -1726,8 +1921,8 @@ def render_article(candidate: dict[str, Any], claims: list[dict[str, Any]], refs
             predicate = str(claim.get("predicate", "related_to")).replace("_", " ")
             subject = claim.get("subject", title)
             obj = claim.get("object", "[unresolved]")
-            chunk = claim.get("chunk_id", "")
-            citation = f" [`{chunk}`]" if chunk else ""
+            segment = claim.get("evidence_segment_id") or claim.get("segment_id") or claim.get("chunk_id", "")
+            citation = f" [`{segment}`]" if segment else ""
             lines.append(f"- {subject} {predicate} {obj}.{citation}")
         lines.append("")
     if candidate.get("priority") in {"A", "B"}:
@@ -1754,12 +1949,12 @@ def render_article(candidate: dict[str, Any], claims: list[dict[str, Any]], refs
 def command_build(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
     wiki_root = repo_path(config.get("paths", {}).get("wiki", "docs/Wiki"))
-    state_path, chunks = latest_import_state(config)
+    state_path, segments = latest_import_state(config)
     progress(f"build: loading import state {rel(state_path) if state_path else '[missing]'}")
     analysis = latest_analysis(config)
     if not analysis:
         progress("build: no saved analysis found; building analysis in memory")
-        analysis = build_corpus_analysis(config, chunks, state_path)
+        analysis = build_corpus_analysis(config, segments, state_path)
     plan = latest_article_plan(config)
     if not plan:
         progress("build: no saved article plan found; planning articles in memory")
@@ -1773,7 +1968,7 @@ def command_build(args: argparse.Namespace) -> int:
         candidates = plan.get("article_candidates", [])[:5]
     progress(f"build: selected {len(candidates)} article candidate(s)")
     task_events = []
-    if not chunks:
+    if not segments:
         result = default_task_store(config).raise_signal(
             task_type="anomaly",
             severity="low",
@@ -1803,7 +1998,7 @@ def command_build(args: argparse.Namespace) -> int:
             progress(f"build: writing article {index}/{len(candidates)}: {title}")
             slug = slugify_title(title, f"article_{index}")
             claims = claims_for_candidate(candidate, analysis)
-            refs = source_refs_for_claims(claims, chunks)
+            refs = source_refs_for_claims(claims, segments)
             article_path = wiki_root / "Articles" / f"{slug}.md"
             provenance_path = wiki_root / "Articles" / f"{slug}.provenance.json"
             article_path.write_text(render_article(candidate, claims, refs, titles), encoding="utf-8")
@@ -1843,7 +2038,7 @@ def command_legacy_wiki_build(args: argparse.Namespace) -> int:
     sources = [repo_path(path) for path in config.get("paths", {}).get("sources", [])]
     existing_sources = [path for path in sources if path.exists()]
     articles = sorted(wiki_root.rglob("*.md")) if wiki_root.exists() else []
-    state_path, chunks = latest_import_state(config)
+    state_path, segments = latest_import_state(config)
     payload = {
         "status": "ready",
         "mode": "auto-apply" if args.apply else "dry-run",
@@ -1851,47 +2046,47 @@ def command_legacy_wiki_build(args: argparse.Namespace) -> int:
         "source_roots": [rel(path) for path in existing_sources],
         "articles_seen": len(articles),
         "source_import": rel(state_path) if state_path else "",
-        "documents_seen": len({str(chunk.get("document_id", "")) for chunk in chunks if isinstance(chunk, dict)}),
+        "documents_seen": len({source_document_id(segment) for segment in segments if isinstance(segment, dict)}),
         "report_path": "",
         "tasks": [],
         "written": [],
         "rollback_hint": "Revert the files listed in `written` and remove the report for this run.",
     }
     if args.apply:
-        if chunks:
-            missing_source_chunks = [
-                str(chunk.get("chunk_id") or chunk.get("document_id") or "unknown")
-                for chunk in chunks
-                if isinstance(chunk, dict) and not chunk.get("source_path")
+        if segments:
+            missing_source_segments = [
+                evidence_segment_id(segment) or source_document_id(segment) or "unknown"
+                for segment in segments
+                if isinstance(segment, dict) and not has_source_locator(segment)
             ]
-            if missing_source_chunks:
+            if missing_source_segments:
                 store = default_task_store(config)
                 result = store.raise_signal(
                     task_type="audit_finding",
-                    severity="high",
+                    severity="medium",
                     role="verifier",
-                    summary=f"Wiki build encountered chunks without source_path: {', '.join(missing_source_chunks[:5])}",
+                    summary=f"Wiki build encountered evidence segments without source locator: {', '.join(missing_source_segments[:5])}",
                     evidence=[rel(state_path) if state_path else rel(wiki_root)],
-                    dedupe_key="wiki-build:missing-source-path:" + hashlib.sha256(",".join(sorted(missing_source_chunks)).encode("utf-8")).hexdigest()[:16],
+                    dedupe_key="wiki-build:missing-source-locator:" + hashlib.sha256(",".join(sorted(missing_source_segments)).encode("utf-8")).hexdigest()[:16],
                     created_by="wiki-build",
                 )
-                payload["tasks"].append({"trigger": "missing_source_path", **result})
+                payload["tasks"].append({"trigger": "missing_source_locator", **result})
             grouped: dict[str, list[dict[str, Any]]] = {}
-            for chunk in chunks:
-                if isinstance(chunk, dict):
-                    grouped.setdefault(str(chunk.get("document_id") or chunk.get("source_path") or "unknown"), []).append(chunk)
-            for index, (document_id, doc_chunks) in enumerate(sorted(grouped.items()), start=1):
-                title = str(doc_chunks[0].get("title") or document_id)
+            for segment in segments:
+                if isinstance(segment, dict):
+                    grouped.setdefault(source_document_id(segment) or str(segment.get("source_path") or "unknown"), []).append(segment)
+            for index, (document_id, doc_segments) in enumerate(sorted(grouped.items()), start=1):
+                title = str(doc_segments[0].get("title") or document_id)
                 article_path = wiki_root / "Articles" / f"{slugify_title(title, f'article_{index}')}.md"
                 ensure_dir(article_path.parent)
                 citations = [
-                    f"- `{chunk.get('chunk_id', '')}` from `{chunk.get('source_path', '')}`"
-                    for chunk in doc_chunks
+                    f"- `{evidence_segment_id(segment)}` from `{segment.get('archive_id') or segment.get('source_url') or segment.get('source_path', '')}`"
+                    for segment in doc_segments
                 ]
                 body_sections = []
-                for chunk in doc_chunks[:5]:
-                    section = str(chunk.get("section") or "Source excerpt")
-                    summary = str(chunk.get("summary") or chunk.get("text", "")[:500]).strip()
+                for segment in doc_segments[:5]:
+                    section = str(segment.get("section") or "Source excerpt")
+                    summary = str(segment.get("summary") or segment.get("text", "")[:500]).strip()
                     body_sections.extend([f"## {section}", "", summary or "[UNRESOLVED]", ""])
                 article_path.write_text(
                     "\n".join(
@@ -2546,7 +2741,7 @@ def print_export_plan(payload: dict[str, Any]) -> None:
 def reset_plan(config: dict[str, Any], target: str) -> dict[str, Any]:
     paths_cfg = config.get("paths", {})
     runtime_state = repo_path(paths_cfg.get("runtime_state", ".wissenswerk/state"))
-    ragprep_imports = repo_path(paths_cfg.get("ragprep_imports", ".wissenswerk/ragprep_imports"))
+    corpus_state = corpus_dir(config)
     reports = repo_path(paths_cfg.get("reports", "reports/wissenswerk"))
     wiki_root = repo_path(paths_cfg.get("wiki", "docs/Wiki"))
     specs: dict[str, dict[str, Any]] = {
@@ -2559,13 +2754,13 @@ def reset_plan(config: dict[str, Any], target: str) -> dict[str, Any]:
         "index": {
             "affected_paths": existing_path_specs([runtime_state / "index", runtime_state / "legacy_vector_cache"]),
             "virtual_targets": [config.get("vector_store", {})],
-            "protected_paths": [rel(ragprep_imports), rel(wiki_root)],
+            "protected_paths": [rel(corpus_state), rel(wiki_root)],
             "stale_indexes": ["pgvector", "lexical-bootstrap"],
             "next_commands": ["./wissenswerk.py ingest --from-ragprep <dir> --apply --json"],
         },
         "generated": {
             "affected_paths": existing_path_specs([reports, runtime_state / "curation", runtime_state / "generated"]),
-            "protected_paths": [rel(ragprep_imports), rel(wiki_root)],
+            "protected_paths": [rel(corpus_state), rel(wiki_root)],
             "stale_indexes": [],
             "next_commands": ["./wissenswerk.py analyze --apply --json", "./wissenswerk.py plan articles --apply --json"],
         },
@@ -2645,10 +2840,10 @@ def command_wipe(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
     paths_cfg = config.get("paths", {})
     runtime_state = repo_path(paths_cfg.get("runtime_state", ".wissenswerk/state"))
-    ragprep_imports = repo_path(paths_cfg.get("ragprep_imports", ".wissenswerk/ragprep_imports"))
+    corpus_state = corpus_dir(config)
     reports = repo_path(paths_cfg.get("reports", "reports/wissenswerk"))
     wiki_root = repo_path(paths_cfg.get("wiki", "docs/Wiki"))
-    tenant_paths = existing_path_specs([runtime_state, ragprep_imports, reports, wiki_root / "Wissenswerk_Platform_Status.md", wiki_root / "Articles"])
+    tenant_paths = existing_path_specs([runtime_state, corpus_state, reports, wiki_root / "Wissenswerk_Platform_Status.md", wiki_root / "Articles"])
     protected = [rel(repo_path(path)) for path in paths_cfg.get("sources", [])]
     protected.extend([rel(wiki_root), "wissenswerk.yaml", "project_manifest.json", "AGENTS.md", "DESIGN.md"])
     needs_confirm = bool(args.apply and not (args.dry_run or not args.apply))
@@ -2829,7 +3024,7 @@ def stats_payload(config: dict[str, Any]) -> dict[str, Any]:
         "status": "ok",
         "generated_at": now_iso(),
         "documents": analysis.get("corpus_inventory", {}).get("documents_total", 0),
-        "chunks": analysis.get("corpus_inventory", {}).get("chunks_total", 0),
+        "segments": analysis.get("corpus_inventory", {}).get("segments_total", 0),
         "languages": analysis.get("corpus_inventory", {}).get("languages", {}),
         "entities": len(analysis.get("entities", [])),
         "claims": len(analysis.get("claims", [])),
@@ -2854,7 +3049,7 @@ def command_stats(args: argparse.Namespace) -> int:
     payload = stats_payload(config)
     report_path = write_report(config, "stats", payload)
     payload["report_path"] = rel(report_path)
-    json_print(payload) if args.json else print(f"Wissenswerk stats: {payload['documents']} documents, {payload['generated_pages']} pages")
+    json_print(payload) if args.json else print(f"Wissenswerk stats: {payload['documents']} documents, {payload['segments']} evidence segments, {payload['generated_pages']} pages")
     return 0
 
 
@@ -2868,7 +3063,7 @@ def demo_report_payload(config: dict[str, Any]) -> dict[str, Any]:
         "project": project,
         "summary": {
             "documents": stats["documents"],
-            "chunks": stats["chunks"],
+            "segments": stats["segments"],
             "entities": stats["entities"],
             "claims": stats["claims"],
             "article_candidates": stats["article_candidates"],
@@ -2899,7 +3094,7 @@ def write_demo_report(config: dict[str, Any], payload: dict[str, Any]) -> list[s
                 f"- Status: {payload['status']}",
                 f"- Project: {payload.get('project', {}).get('name', 'Wissenswerk Project')}",
                 f"- Documents: {summary['documents']}",
-                f"- Chunks: {summary['chunks']}",
+                f"- Evidence segments: {summary['segments']}",
                 f"- Entities: {summary['entities']}",
                 f"- Claims: {summary['claims']}",
                 f"- Article candidates: {summary['article_candidates']}",
@@ -3121,7 +3316,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--uncertainty-policy", default="")
     setup.add_argument("--json", action="store_true")
 
-    ingest = sub.add_parser("ingest", help="Import RagPrep pre-chunked artifacts")
+    ingest = sub.add_parser("ingest", help="Import source documents and RagPrep evidence segments")
     ingest.add_argument("--from-ragprep", required=True)
     ingest.add_argument("--apply", action="store_true")
     ingest.add_argument("--json", action="store_true")

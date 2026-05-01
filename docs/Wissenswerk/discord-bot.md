@@ -19,7 +19,7 @@ The current implementation reports dry status and token readiness. It does not c
 ## Target Commands
 
 - `/ww ask <question>`: answer with citations and source scores
-- `/ww sources <question>`: show source chunks without synthesis
+- `/ww sources <question>`: show source documents and evidence segments without synthesis
 - `/ww status`: show index/provider/config status
 - `/ww rebuild`: admin-only rebuild request or queue trigger
 - `!ww <question>`: prefix fallback for simple servers
@@ -28,7 +28,7 @@ The current implementation reports dry status and token readiness. It does not c
 
 - Tokens are read only from environment variables such as `DISCORD_BOT_TOKEN`.
 - Server/channel allowlists belong in `wissenswerk.yaml`.
-- Bot output must include source paths, chunk IDs, scores, and wiki links when available.
+- Bot output must include source locators, evidence segment IDs, scores, and wiki links when available.
 - Admin commands must be rate-limited and auditable.
 - Tests must use a mock Discord runtime and a mock Retriever; no real Discord connection is required in CI.
 

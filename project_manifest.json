@@ -27,7 +27,7 @@
   },
   "capabilities": {
     "setup_profile": "Create quick or guided project profiles for local-history demos and production projects.",
-    "ragprep_import": "Import pre-chunked corpora without duplicating parsing logic.",
+    "ragprep_import": "Import prepared source corpora, register source documents, and normalize RagPrep evidence segments without duplicating parsing logic.",
     "corpus_analysis": "Build corpus inventory, entity registry, claim ledger, concept graph, source coverage, and conflict candidates.",
     "article_planning": "Prioritize article candidates before prose generation.",
     "wiki_build": "Compile Markdown pages and per-article provenance JSON from article plans and claims.",

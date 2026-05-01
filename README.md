@@ -6,7 +6,7 @@ The project is designed for agents and humans working together through open repo
 
 ## What It Can Do Today
 
-Wissenswerk currently provides a dependency-light local CLI prototype. It can create a project profile, import RagPrep JSON/JSONL chunks, analyze the whole corpus into inventory/entities/claims/graph artifacts, plan article candidates, build Markdown pages with provenance JSON, audit source/provenance risks, generate demo statistics, and prepare a GitHub Pages dry-run.
+Wissenswerk currently provides a dependency-light local CLI prototype. It can create a project profile, import source documents from RagPrep JSON/JSONL artifacts, normalize internal evidence segments, analyze the whole corpus into inventory/entities/claims/graph artifacts, plan article candidates, build Markdown pages with provenance JSON, audit source/provenance risks, generate demo statistics, and prepare a GitHub Pages dry-run.
 
 Retrieval is still a lexical bootstrap. PostgreSQL + pgvector and OpenAI-compatible embedding/rerank providers are configured as the target architecture, not yet the full default runtime.
 
@@ -55,7 +55,7 @@ The inspectable productive flow is:
 ## Core Principles
 
 - **Markdown-first:** generated knowledge remains inspectable and portable.
-- **RagPrep boundary:** parsing, cleanup, and pre-chunking happen before Wissenswerk.
+- **RagPrep boundary:** parsing, cleanup, and segmentation happen before Wissenswerk.
 - **Graph before prose:** the compiler analyzes corpus inventory, entities, claims, and concept links before drafting pages.
 - **Claims over vibes:** generated articles are compiled from source-backed candidate claims, not free-form summaries alone.
 - **No source dumping:** public demos can publish source metadata and generated pages without publishing private full-text corpora.
@@ -70,7 +70,7 @@ The inspectable productive flow is:
 Public role IDs are English and stable:
 
 - `coordinator`: run planning, reports, delegation, human escalation.
-- `curator`: corpus inventory, RagPrep import, article planning, source mapping.
+- `curator`: source-document inventory, RagPrep import, article planning, source mapping.
 - `verifier`: citations, conflicts, link checks, provenance and audit.
 - `maintainer`: core code, providers, migrations, tests, releases.
 

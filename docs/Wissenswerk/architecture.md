@@ -9,7 +9,7 @@ category: Technical
 Wissenswerk is a knowledge compiler, not only a chatbot. The product boundary is:
 
 ```text
-RagPrep artifacts -> setup/profile -> corpus analysis -> article plan -> Markdown wiki + provenance + retrieval + reports
+RagPrep artifacts -> setup/import profile -> source registry -> evidence segments -> corpus analysis -> article plan -> Markdown wiki + provenance + retrieval + reports
 ```
 
 ## Layer Model
@@ -19,7 +19,7 @@ RagPrep artifacts -> setup/profile -> corpus analysis -> article plan -> Markdow
 | Contracts | Human- and agent-readable rules | `AGENTS.md`, `DESIGN.md`, `project_manifest.json` |
 | Tenant config | Paths, providers, localization, memory, reset policy | `wissenswerk.yaml` |
 | CLI | Portable execution surface | `./wissenswerk.py` |
-| Corpus import | RagPrep chunk validation and state | `ingest --from-ragprep` |
+| Corpus import | Source document registration and evidence segment normalization | `ingest --from-ragprep` |
 | Corpus analysis | Inventory, entity registry, claim ledger, concept graph, coverage, conflicts | `analyze` |
 | Article planning | Prioritized article candidates and recommended sections | `plan articles` |
 | Wiki output | Markdown pages, provenance JSON, reports | `build` |
@@ -33,9 +33,9 @@ RagPrep artifacts -> setup/profile -> corpus analysis -> article plan -> Markdow
 
 ```mermaid
 flowchart LR
-  A["Document corpus"] --> B["RagPrep parsing and pre-chunking"]
+  A["Document corpus"] --> B["RagPrep parsing and segmentation"]
   B --> C["Wissenswerk ingest"]
-  C --> D["Import state"]
+  C --> D["Source registry + evidence segments"]
   D --> E["Corpus inventory, claims, concept graph"]
   E --> F["Article plan"]
   F --> G["Markdown wiki + provenance JSON"]
