@@ -38,40 +38,6 @@ class WissenswerkCliContractTests(unittest.TestCase):
         self.assertIn(payload["runtime_status"], {"ready", "missing_credentials"})
         self.assertEqual(payload["vector_store"]["kind"], "pgvector")
 
-    def test_export_plan_has_no_public_blockers(self):
-        payload = wissenswerk.export_plan(wissenswerk.DEFAULT_EXPORT_MANIFEST)
-        self.assertEqual(payload["status"], "ready")
-        self.assertEqual(payload["blockers"], [])
-        self.assertEqual(payload["summary"]["overlap"], [])
-
-    def test_export_materialize_applies_public_mappings(self):
-        payload = wissenswerk.export_materialize_plan(
-            wissenswerk.DEFAULT_EXPORT_MANIFEST,
-            wissenswerk.REPO_ROOT / ".tmp" / "wissenswerk-export",
-        )
-        destinations = {operation["destination"] for operation in payload["operations"]}
-        self.assertIn("AGENTS.md", destinations)
-        self.assertIn("LICENSE", destinations)
-        self.assertIn("project_manifest.json", destinations)
-        self.assertIn("pyproject.toml", destinations)
-        self.assertIn("Makefile", destinations)
-        self.assertIn("wissenswerk.yaml", destinations)
-
-    def test_materialized_manifest_uses_public_names(self):
-        payload = wissenswerk.materialized_manifest_payload(wissenswerk.DEFAULT_EXPORT_MANIFEST)
-        flattened = wissenswerk.flatten_manifest_paths(payload.get("include", {}))
-        self.assertIn("AGENTS.md", flattened)
-        self.assertIn("LICENSE", flattened)
-        self.assertIn("project_manifest.json", flattened)
-        self.assertIn("pyproject.toml", flattened)
-        self.assertIn("Makefile", flattened)
-        self.assertIn("wissenswerk.yaml", flattened)
-        self.assertEqual(payload.get("export_mappings"), {})
-
-    def test_manifest_spec_overlap_detects_directory_specs(self):
-        self.assertTrue(wissenswerk.manifest_spec_matches_file("docs/Wissenswerk/", "docs/Wissenswerk/index.md"))
-        self.assertFalse(wissenswerk.manifest_spec_matches_file("docs/Wissenswerk/", "docs/setup_rag.md"))
-
     def test_task_store_dedupes_open_signals(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = wissenswerk.TaskStore(Path(tmp) / "tasks")
@@ -300,6 +266,79 @@ class WissenswerkCliContractTests(unittest.TestCase):
         self.assertEqual(by_title["Source: Council Notes"]["priority"], "B")
         self.assertEqual(by_title["Source: Council Notes"]["status"], "planned")
 
+    def test_type_specific_article_renderers_are_deterministic(self):
+        config = wissenswerk.default_config_payload()
+        config["project"]["name"] = "Small Archive"
+        config["project"]["type"] = "local-history"
+        segments = [
+            {
+                "document_id": "doc-1",
+                "segment_id": "doc-1:0001",
+                "title": "Council Notes",
+                "section": "Market Square",
+                "text": "In 1899 the council recorded repairs near the market square.",
+                "summary": "Council notes describe repairs near the market square.",
+                "entities": ["Council"],
+                "keywords": ["market square"],
+                "source_url": "https://example.test/council-notes",
+                "language": "en",
+            },
+            {
+                "document_id": "doc-2",
+                "segment_id": "doc-2:0001",
+                "title": "School Register",
+                "section": "Schoolhouse",
+                "text": "In 1901 the school register mentioned the schoolhouse.",
+                "summary": "School register describes the schoolhouse.",
+                "entities": ["Schoolhouse"],
+                "source_url": "https://example.test/school-register",
+                "language": "en",
+            },
+        ]
+        analysis = wissenswerk.build_corpus_analysis(config, segments, None)
+        plan = wissenswerk.build_article_plan(config, analysis)
+        candidates = {candidate["title"]: candidate for candidate in plan["article_candidates"]}
+        related = [candidate["title"] for candidate in plan["article_candidates"]]
+
+        def render(title):
+            candidate = candidates[title]
+            claims = wissenswerk.claims_for_candidate(candidate, analysis)
+            refs = wissenswerk.source_refs_for_claims(claims, segments)
+            context = wissenswerk.build_render_context(config, candidate, claims, refs, related, analysis, segments)
+            return claims, wissenswerk.render_article(context)
+
+        timeline_claims, timeline_page = render("Timeline of Small Archive")
+        self.assertTrue(timeline_claims)
+        self.assertTrue(all(claim["predicate"] == "mentions_year" for claim in timeline_claims))
+        self.assertIn("## Timeline", timeline_page)
+        self.assertIn("### 1899", timeline_page)
+
+        source_claims, source_page = render("Source: Council Notes")
+        self.assertTrue(source_claims)
+        self.assertTrue(all(claim["source_document_id"] == "doc-1" for claim in source_claims))
+        self.assertIn("## Source metadata", source_page)
+        self.assertIn("## Coverage", source_page)
+
+        _, sources_page = render("Sources Overview")
+        self.assertIn("## Source coverage", sources_page)
+        self.assertIn("## Source documents", sources_page)
+
+        _, navigation_page = render("Places and Buildings")
+        self.assertIn("## Places and buildings", navigation_page)
+        self.assertIn("## Candidate entries", navigation_page)
+
+        _, glossary_page = render("Glossary of Historical Terms")
+        self.assertIn("## Glossary", glossary_page)
+        self.assertIn("## Terms", glossary_page)
+
+        _, concept_page = render("Council")
+        self.assertIn("## Concept summary", concept_page)
+        self.assertIn("## Evidence-backed claims", concept_page)
+
+        _, topic_page = render("Market Square")
+        self.assertIn("## Topic coverage", topic_page)
+        self.assertIn("## Evidence-backed claims", topic_page)
+
     def test_demo_release_pipeline_generates_analysis_plan_wiki_and_reports(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -354,7 +393,17 @@ class WissenswerkCliContractTests(unittest.TestCase):
             self.assertTrue((root / "article_plans" / "article_plan.json").exists())
             self.assertTrue((root / "wiki" / "Articles").exists())
             self.assertTrue((root / "wiki" / "Articles" / "Source_Sample_RagPrep_Document.md").exists())
+            self.assertIn("## Source metadata", (root / "wiki" / "Articles" / "Source_Sample_RagPrep_Document.md").read_text(encoding="utf-8"))
+            self.assertIn("## Source coverage", (root / "wiki" / "Articles" / "Sources_Overview.md").read_text(encoding="utf-8"))
+            self.assertIn("## Timeline", (root / "wiki" / "Articles" / "Timeline_of_Porreres_Test.md").read_text(encoding="utf-8"))
+            self.assertIn("## Glossary", (root / "wiki" / "Articles" / "Glossary_of_Historical_Terms.md").read_text(encoding="utf-8"))
             self.assertTrue(list((root / "wiki" / "Articles").glob("*.provenance.json")))
+            provenance = json.loads((root / "wiki" / "Articles" / "Source_Sample_RagPrep_Document.provenance.json").read_text(encoding="utf-8"))
+            self.assertIn("candidate", provenance)
+            self.assertIn("claims", provenance)
+            self.assertIn("sources", provenance)
+            self.assertIn("source_import", provenance)
+            self.assertEqual(provenance["render_profile"]["mode"], "deterministic")
             self.assertTrue((root / "reports" / "demo_summary.json").exists())
 
     def test_demo_run_orchestrates_pipeline_with_single_json_result(self):

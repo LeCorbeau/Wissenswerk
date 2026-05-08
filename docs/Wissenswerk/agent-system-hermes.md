@@ -15,7 +15,7 @@ Hermes should act as a `coordinator` by default:
 1. Read `AGENTS.md`, `DESIGN.md`, `project_manifest.json`, and `wissenswerk.yaml`.
 2. Run `./wissenswerk.py doctor --json`.
 3. Read `.wissenswerk/profile/project_profile.json` when present, or run `setup --quick` / `setup --guided`.
-4. Run `task digest` and inspect `export plan` before public-repo work.
+4. Run `task digest` and inspect `hygiene reports` before public-repo work.
 5. Delegate bounded work to `curator`, `verifier`, or `maintainer` roles.
 6. End with concise status and machine-readable reports.
 
@@ -24,7 +24,7 @@ Hermes should act as a `coordinator` by default:
 - `coordinator`: plans runs, checks state, decides escalation
 - `curator`: imports RagPrep artifacts and drafts article plans
 - `verifier`: checks provenance, conflicts, links, and audit reports
-- `maintainer`: changes core code, provider layer, migrations, tests, and export tooling
+- `maintainer`: changes core code, provider layer, migrations, tests, and release tooling
 
 Localized display names are aliases only. Public role IDs stay English.
 
@@ -36,7 +36,6 @@ Hermes should prefer these neutral surfaces:
 - `AGENTS.md` and nested tenant instructions
 - `DESIGN.md`
 - `project_manifest.json`
-- `wissenswerk_export_manifest.json`
 - MCP and tool manifests
 
 Host-specific skill folders are generated adapter outputs. They must not contain unique semantics absent from the neutral contracts.
@@ -52,7 +51,7 @@ For the pre-publication demo run, Hermes should follow [Demo Test Run](demo-test
 For maintainer work:
 
 ```text
-doctor -> hygiene reports -> plan -> apply -> tests -> export plan -> report
+doctor -> hygiene reports -> plan -> apply -> tests -> report
 ```
 
 Hermes should never treat memory or chat history as factual authority. Facts come from sources, wiki pages, provenance, retrieval, and audits.

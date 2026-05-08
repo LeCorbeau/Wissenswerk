@@ -60,10 +60,10 @@ Before changing code:
 Verification gate:
 - python3 -m py_compile wissenswerk.py
 - ./wissenswerk.py doctor --json
-- ./wissenswerk.py export plan --strict --json
 - ./wissenswerk.py test --json
+- ./wissenswerk.py design lint --json
+- ./wissenswerk.py hygiene reports --json
 - git diff --check
-- ./wissenswerk.py export verify --target <fresh-export-dir> --json
 
 Known next improvements:
 - Improve article planning heuristics for small local collections.

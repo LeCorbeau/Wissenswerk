@@ -6,7 +6,9 @@ The project is designed for agents and humans working together through open repo
 
 ## What It Can Do Today
 
-Wissenswerk currently provides a dependency-light local CLI prototype. It can create a project profile, import source documents from RagPrep JSON/JSONL artifacts, normalize internal evidence segments, analyze the whole corpus into inventory/entities/claims/graph artifacts, plan article candidates, build Markdown pages with provenance JSON, audit source/provenance risks, generate demo statistics, and prepare a GitHub Pages dry-run.
+Wissenswerk currently provides a dependency-light local CLI prototype. It can create a project profile, import source documents from RagPrep JSON/JSONL artifacts, normalize internal evidence segments, analyze the whole corpus into inventory/entities/claims/graph artifacts, plan typed article candidates, build type-specific Markdown pages with provenance JSON, audit source/provenance risks, generate demo statistics, and prepare a GitHub Pages dry-run.
+
+The wiki builder is deterministic by default. It renders overview, timeline, source, topic, concept, navigation, sources overview, and glossary pages from the claim ledger and source metadata. Article plans and provenance include a render profile so provider-backed synthesis can be added later without changing the public CLI flow.
 
 Retrieval is still a lexical bootstrap. PostgreSQL + pgvector and OpenAI-compatible embedding/rerank providers are configured as the target architecture, not yet the full default runtime.
 
@@ -97,16 +99,10 @@ python3 -m py_compile wissenswerk.py
 ./wissenswerk.py doctor --json
 ./wissenswerk.py audit --json
 ./wissenswerk.py stats --json
-./wissenswerk.py export plan --strict --json
 ./wissenswerk.py test --json
+./wissenswerk.py design lint --json
+./wissenswerk.py hygiene reports --json
 git diff --check
-```
-
-To create and verify a candidate public repository tree:
-
-```bash
-./wissenswerk.py export materialize --target /tmp/wissenswerk-public --apply --json
-./wissenswerk.py export verify --target /tmp/wissenswerk-public --json
 ```
 
 ## GitHub Readiness

@@ -6,11 +6,12 @@
 
 - [ ] `python3 -m py_compile wissenswerk.py`
 - [ ] `./wissenswerk.py doctor --json`
-- [ ] `./wissenswerk.py export plan --strict --json`
 - [ ] `./wissenswerk.py test --json`
+- [ ] `./wissenswerk.py design lint --json`
+- [ ] `./wissenswerk.py hygiene reports --json`
 - [ ] `git diff --check`
 
-## Public Export Impact
+## Public Repository Impact
 
-- [ ] No private corpora, generated reports, secrets, or tenant-specific content are added to the public export.
-- [ ] Documentation and `wissenswerk_export_manifest.json` are updated when public surfaces change.
+- [ ] No private corpora, generated reports, secrets, or tenant-specific content are added.
+- [ ] Documentation is updated when public surfaces change.

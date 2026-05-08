@@ -16,21 +16,12 @@ Wissenswerk is a generic corpus-to-wiki platform. Contributions should keep the 
 ./wissenswerk.py doctor --json
 ./wissenswerk.py providers check --json
 ./wissenswerk.py design lint --json
-./wissenswerk.py export plan --strict --json
 ./wissenswerk.py test --json
+./wissenswerk.py hygiene reports --json
 git diff --check
 ```
 
 Use `--json` where available so agents and CI can parse results reliably.
-
-## Public Export Flow
-
-```bash
-./wissenswerk.py export materialize --target /tmp/wissenswerk-public --apply --json
-./wissenswerk.py export verify --target /tmp/wissenswerk-public --json
-```
-
-The materialized tree must pass its own verification before it is pushed or released.
 
 ## Data and Secrets
 

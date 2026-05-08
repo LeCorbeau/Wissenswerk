@@ -21,11 +21,11 @@ RagPrep artifacts -> setup/import profile -> source registry -> evidence segment
 | CLI | Portable execution surface | `./wissenswerk.py` |
 | Corpus import | Source document registration and evidence segment normalization | `ingest --from-ragprep` |
 | Corpus analysis | Inventory, entity registry, claim ledger, concept graph, coverage, conflicts | `analyze` |
-| Article planning | Prioritized article candidates and recommended sections | `plan articles` |
-| Wiki output | Markdown pages, provenance JSON, reports | `build` |
+| Article planning | Prioritized typed article candidates and recommended sections | `plan articles` |
+| Wiki output | Type-specific Markdown pages, provenance JSON, reports | `build` |
 | Retrieval | Search over raw/wiki/all | `search` |
 | Coordination | Local Signals and Tasks | `task`, `run status` |
-| Quality | Contract, provider, design, audit, stats, export, and test checks | `doctor`, `audit`, `stats`, `design lint`, `export plan`, `test` |
+| Quality | Contract, provider, design, audit, stats, hygiene, and test checks | `doctor`, `audit`, `stats`, `design lint`, `hygiene reports`, `test` |
 | Publish | GitHub Pages readiness without remote side effects | `publish pages` |
 | Reset | Local state reset and protected wipe planning | `reset`, `wipe` |
 
@@ -37,8 +37,8 @@ flowchart LR
   B --> C["Wissenswerk ingest"]
   C --> D["Source registry + evidence segments"]
   D --> E["Corpus inventory, claims, concept graph"]
-  E --> F["Article plan"]
-  F --> G["Markdown wiki + provenance JSON"]
+  E --> F["Typed article plan"]
+  F --> G["Type-specific Markdown wiki + provenance JSON"]
   D --> H["pgvector index"]
   G --> I["Retriever search"]
   H --> I

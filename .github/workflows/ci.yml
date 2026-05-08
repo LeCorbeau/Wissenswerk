@@ -30,7 +30,6 @@ jobs:
 
       - name: Validate JSON contracts
         run: |
-          python -m json.tool wissenswerk_export_manifest.json >/dev/null
           python -m json.tool wissenswerk.yaml >/dev/null
           python -m json.tool project_manifest.json >/dev/null
 
@@ -40,8 +39,11 @@ jobs:
       - name: Run doctor
         run: ./wissenswerk.py doctor --json
 
-      - name: Check public export plan
-        run: ./wissenswerk.py export plan --strict --json
+      - name: Run design lint
+        run: ./wissenswerk.py design lint --json
+
+      - name: Check report hygiene
+        run: ./wissenswerk.py hygiene reports --json
 
       - name: Check diff hygiene
         run: git diff --check

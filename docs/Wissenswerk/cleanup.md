@@ -10,13 +10,7 @@ Cleanliness for Wissenswerk means that the public repository contains only gener
 
 ## Publishable Scope
 
-The public export is controlled by `wissenswerk_export_manifest.json` and inspected with:
-
-```bash
-./wissenswerk.py export plan --strict --json
-```
-
-The export includes:
+The GitHub repository is the public Wissenswerk surface. It should contain:
 
 - root contracts: `AGENTS.md`, `DESIGN.md`, `README.md`, `CONTRIBUTING.md`, `LICENSE`
 - GitHub community and CI files
@@ -24,7 +18,7 @@ The export includes:
 - focused tests and fixtures
 - Wissenswerk documentation
 
-The export excludes:
+The repository must exclude:
 
 - private corpora
 - generated reports
@@ -49,16 +43,21 @@ A tree is clean enough for publication when:
 
 - `python3 -m py_compile wissenswerk.py` succeeds
 - `./wissenswerk.py doctor --json` is `ok`
-- `./wissenswerk.py export plan --strict --json` is `ready`
 - `./wissenswerk.py test --json` passes
+- `./wissenswerk.py design lint --json` passes
+- `./wissenswerk.py hygiene reports --json` is reviewed
 - `git diff --check` is clean
 - no public file contains private corpus references, local secrets, generated report state, or tenant-specific assumptions
 
-## Candidate Verification
+## Repository Verification
 
 ```bash
-./wissenswerk.py export materialize --target /tmp/wissenswerk-public --apply --json
-./wissenswerk.py export verify --target /tmp/wissenswerk-public --json
+python3 -m py_compile wissenswerk.py
+./wissenswerk.py doctor --json
+./wissenswerk.py test --json
+./wissenswerk.py design lint --json
+./wissenswerk.py hygiene reports --json
+git diff --check
 ```
 
-The second command runs the public gates inside the materialized tree.
+These checks run directly in the canonical repository.

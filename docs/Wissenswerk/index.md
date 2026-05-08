@@ -43,7 +43,6 @@ For an inspectable one-command demo:
 - `DESIGN.md`: design tokens and rationale for UI/documentation work.
 - `wissenswerk.yaml`: tenant, provider, path, workflow, memory, and reset configuration.
 - `project_manifest.json`: machine-readable product manifest.
-- `wissenswerk_export_manifest.json`: repository export and publication contract.
 
 ## Roles
 

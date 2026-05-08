@@ -3,7 +3,6 @@
 
 # Core contracts and release gates.
 /wissenswerk.py @LeCorbeau
-/wissenswerk_export_manifest.json @LeCorbeau
 /AGENTS.md @LeCorbeau
 /DESIGN.md @LeCorbeau
 /.github/ @LeCorbeau

@@ -22,7 +22,7 @@ The repository must contain:
 - `SUPPORT.md`: support boundaries.
 - `pyproject.toml`: Python package metadata and console script.
 - `.gitignore`: secrets, runtime state, caches, local DBs, and build outputs.
-- `Makefile`: short local aliases for verify, test, export plan, candidate creation, and candidate verification.
+- `Makefile`: short local aliases for verify, test, and runtime cleanup checks.
 - `.github/workflows/ci.yml`: Python CI.
 - `.github/ISSUE_TEMPLATE/`: bug and feature issue forms.
 - `.github/PULL_REQUEST_TEMPLATE.md`: PR checklist.
@@ -37,10 +37,9 @@ python3 -m py_compile wissenswerk.py
 ./wissenswerk.py doctor --json
 ./wissenswerk.py audit --json
 ./wissenswerk.py stats --json
-./wissenswerk.py export plan --strict --json
-./wissenswerk.py export materialize --target /tmp/wissenswerk-public --apply --json
-./wissenswerk.py export verify --target /tmp/wissenswerk-public --json
 ./wissenswerk.py test --json
+./wissenswerk.py design lint --json
+./wissenswerk.py hygiene reports --json
 git diff --check
 ```
 
@@ -52,20 +51,17 @@ The public repository should be easy for hosted and local coding agents to work 
 - JSON-producing CLI commands for machine parsing,
 - CI that mirrors local gates,
 - no hidden semantics in IDE-specific adapter files,
-- no secrets or private generated state in export scope,
+- no secrets or private generated state in the repository,
 - issue/PR templates that ask for sanitized reproduction steps.
 
 ## Current Status
 
-`./wissenswerk.py export plan --strict --json` is the authority for current readiness. A `ready` result means:
+This repository is the canonical public repository. Current readiness is established by the direct repository gate above. A ready repository has:
 
-- all include specs exist,
-- public gates reference included files,
-- include/exclude paths do not overlap,
-- public safety scans found no forbidden tenant or legacy-gate patterns.
-
-Use `./wissenswerk.py export materialize --target <dir> --apply --json` to create the candidate tree.
-Use `./wissenswerk.py export verify --target <dir> --json` to run the same gates inside the materialized tree.
+- passing health, test, design, and diff checks,
+- no tracked generated report ballast or private runtime state,
+- no private source leaks in generated wiki output,
+- no open blocking coordination tasks.
 
 ## Demo Release Gate
 

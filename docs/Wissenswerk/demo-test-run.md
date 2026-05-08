@@ -21,7 +21,7 @@ Hermes acts as `coordinator`. Other personas are role scopes, not mandatory sepa
 
 - `curator`: source inventory, evidence segment normalization, article planning.
 - `verifier`: provenance, source locators, conflicts, audit findings.
-- `maintainer`: CLI, tests, export, publication readiness.
+- `maintainer`: CLI, tests, release hygiene, publication readiness.
 
 ## Required Inputs
 
@@ -186,7 +186,7 @@ Article planning ranks candidates by:
 - navigational value
 - conflict or uncertainty relevance
 
-The output is `.wissenswerk/article_plans/article_plan.json`.
+The output is `.wissenswerk/article_plans/article_plan.json`. Planned candidates include article type, subtype, source documents, planning basis, and deterministic render profile metadata.
 
 Hermes should review whether the plan looks plausible before building. For the Porreres-style demo, expected classes of pages are:
 
@@ -213,6 +213,8 @@ Build writes generated Markdown and provenance:
 - `reports/wissenswerk/*_wiki_build.json`
 
 Generated pages must cite source references and must not publish private local source paths. If source coverage is weak, Hermes should leave uncertainty visible rather than smoothing it into confident prose.
+
+The current renderer is deterministic. It uses article subtype to render overview, timeline, source, topic, concept, navigation, sources overview, and glossary structures. Provider-backed synthesis is a future extension point; it is not invoked during the demo gate.
 
 ### 7. Audit, Stats, Demo Report
 

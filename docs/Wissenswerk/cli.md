@@ -53,7 +53,7 @@ Builds corpus inventory, entity registry, claim ledger, concept graph, source co
 ./wissenswerk.py plan articles --apply --json
 ```
 
-Prioritizes article candidates from the analysis artifacts. `curate` remains as a compatibility command, but new automation should prefer `plan articles`.
+Prioritizes article candidates from the analysis artifacts. Candidates include stable `article_subtype` and deterministic `render_profile` fields for the wiki builder. `curate` remains as a compatibility command, but new automation should prefer `plan articles`.
 
 ### Build Wiki
 
@@ -61,7 +61,7 @@ Prioritizes article candidates from the analysis artifacts. `curate` remains as 
 ./wissenswerk.py build --apply --json
 ```
 
-Builds generated wiki artifacts from article plans and writes per-article provenance JSON. `wiki build` remains a compatibility alias.
+Builds generated wiki artifacts from article plans and writes per-article provenance JSON. The deterministic renderer supports overview, timeline, source, topic, concept, navigation, sources overview, and glossary pages. `wiki build` remains a compatibility alias.
 
 ### Search
 
@@ -107,21 +107,6 @@ Signals are coordination events. Tasks are tracked work items. They are local ru
 
 Supported task types are `anomaly`, `blocker`, `handoff`, `approval`, `audit_finding`, and `run_event`. Supported statuses are `submitted`, `working`, `input-required`, `auth-required`, `completed`, `failed`, `canceled`, and `rejected`.
 
-## Export Commands
-
-```bash
-./wissenswerk.py export plan --strict --json
-./wissenswerk.py export materialize --target /tmp/wissenswerk-public --json
-./wissenswerk.py export materialize --target /tmp/wissenswerk-public --apply --json
-./wissenswerk.py export verify --target /tmp/wissenswerk-public --json
-```
-
-`export plan` validates `wissenswerk_export_manifest.json`.
-
-`export materialize` copies the public export tree into a target directory. It is a dry-run unless `--apply` is present.
-
-`export verify` runs the public gates inside an already materialized target directory. Use it before creating or pushing a standalone repository.
-
 ## Test
 
 ```bash
@@ -139,7 +124,8 @@ python3 -m py_compile wissenswerk.py
 ./wissenswerk.py doctor --json
 ./wissenswerk.py audit --json
 ./wissenswerk.py stats --json
-./wissenswerk.py export plan --strict --json
 ./wissenswerk.py test --json
+./wissenswerk.py design lint --json
+./wissenswerk.py hygiene reports --json
 git diff --check
 ```

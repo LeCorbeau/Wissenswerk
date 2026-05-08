@@ -1,13 +1,13 @@
-.PHONY: verify doctor test export-plan export-candidate export-verify clean-runtime
+.PHONY: verify doctor test clean-runtime
 
 PYTHON ?= python3
-EXPORT_TARGET ?= /tmp/wissenswerk-public-candidate
 
 verify:
 	$(PYTHON) -m py_compile wissenswerk.py
 	./wissenswerk.py doctor --json
-	./wissenswerk.py export plan --strict --json
 	./wissenswerk.py test --json
+	./wissenswerk.py design lint --json
+	./wissenswerk.py hygiene reports --json
 	git diff --check
 
 doctor:
@@ -15,15 +15,6 @@ doctor:
 
 test:
 	./wissenswerk.py test --json
-
-export-plan:
-	./wissenswerk.py export plan --strict --json
-
-export-candidate:
-	./wissenswerk.py export materialize --target "$(EXPORT_TARGET)" --apply --json
-
-export-verify:
-	./wissenswerk.py export verify --target "$(EXPORT_TARGET)" --json
 
 clean-runtime:
 	./wissenswerk.py reset generated --dry-run --json

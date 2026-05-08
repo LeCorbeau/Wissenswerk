@@ -34,9 +34,27 @@ Useful reference points:
 ## Current Weaknesses
 
 - The Python core is still a bootstrap script, not a package.
-- Article generation is not yet the full compiler pipeline.
+- Article rendering is deterministic and type-specific, but provider-backed synthesis is not implemented yet.
 - Test coverage is strong on CLI contracts but weak on unit-level behavior.
 - Discord is configured only as a status adapter, not as a live bot.
+
+## Implemented vs Target
+
+Implemented today:
+
+- RagPrep JSON/JSONL import into source documents and evidence segments.
+- Corpus analysis into inventory, entities, claims, concept graph, source coverage, and bootstrap conflicts.
+- Typed article planning and deterministic wiki rendering with provenance JSON.
+- Lexical search over raw/wiki/all scopes.
+- Local Signals & Tasks coordination state.
+- Doctor, audit, stats, hygiene, design lint, demo report, and GitHub Pages dry-run checks.
+
+Target architecture:
+
+- pgvector ingestion, semantic ranking, and rerank.
+- Provider-backed article synthesis behind the deterministic render seam.
+- Richer conflict detection across documents.
+- Live Discord/API adapters over the same retrieval surface.
 
 ## Product Thesis
 

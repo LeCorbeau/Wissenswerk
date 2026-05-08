@@ -35,6 +35,6 @@ body:
     id: risks
     attributes:
       label: Risks and constraints
-      description: Public export, provenance, provider, tenant, or security implications.
+      description: Publication, provenance, provider, tenant, or security implications.
     validations:
       required: false

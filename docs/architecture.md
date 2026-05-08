@@ -11,7 +11,6 @@ RagPrep artifacts -> ingest -> curate -> wiki build -> search/bot/API
 - `./wissenswerk.py`
 - `wissenswerk.yaml`
 - `project_manifest.json`
-- `wissenswerk_export_manifest.json`
 - `AGENTS.md`
 - `DESIGN.md`
 

@@ -8,7 +8,6 @@ import io
 import json
 import os
 import re
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -21,7 +20,6 @@ REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = REPO_ROOT / "wissenswerk.yaml"
 DEFAULT_DESIGN = REPO_ROOT / "DESIGN.md"
 DEFAULT_MANIFEST = REPO_ROOT / "project_manifest.json"
-DEFAULT_EXPORT_MANIFEST = REPO_ROOT / "wissenswerk_export_manifest.json"
 TASK_TYPES = {"anomaly", "blocker", "handoff", "approval", "audit_finding", "run_event"}
 TASK_SEVERITIES = {"low", "medium", "high", "critical"}
 TASK_STATUSES = {"submitted", "working", "input-required", "auth-required", "completed", "failed", "canceled", "rejected"}
@@ -1707,6 +1705,31 @@ def candidate_priority(entity: dict[str, Any], project_type: str) -> str:
     return "C"
 
 
+def article_subtype_for_title(title: str, candidate_type: str) -> str:
+    normalized = title.casefold()
+    if candidate_type == "source":
+        return "source"
+    if "timeline" in normalized:
+        return "timeline"
+    if normalized == "sources overview":
+        return "sources_overview"
+    if "glossary" in normalized:
+        return "glossary"
+    if "places" in normalized or "buildings" in normalized:
+        return "places_buildings"
+    if "institutions" in normalized:
+        return "institutions"
+    if "people" in normalized or "families" in normalized:
+        return "people_families"
+    if candidate_type == "topic":
+        return "topic"
+    if candidate_type == "concept":
+        return "concept"
+    if candidate_type == "navigation":
+        return "navigation"
+    return "overview"
+
+
 def build_article_plan(config: dict[str, Any], analysis: dict[str, Any]) -> dict[str, Any]:
     project = config.get("project", {})
     project_name = str(project.get("name") or "Project")
@@ -1723,16 +1746,19 @@ def build_article_plan(config: dict[str, Any], analysis: dict[str, Any]) -> dict
         if title.casefold() in seen_titles:
             continue
         seen_titles.add(title.casefold())
+        candidate_type = "overview" if index <= 4 else "navigation"
         candidates.append(
             {
                 "id": f"ARTICLE-{len(candidates) + 1:04d}",
                 "title": title,
                 "priority": "A" if index <= 4 else "B",
-                "type": "overview" if index <= 4 else "navigation",
+                "type": candidate_type,
+                "article_subtype": article_subtype_for_title(title, candidate_type),
                 "source_entities": [],
                 "source_documents": [doc.get("document_id", "") for doc in docs[:5]],
                 "recommended_sections": ["Overview", "Evidence-backed claims", "Historical context", "Open questions", "Sources", "Related pages"],
                 "planning_basis": ["mandatory_profile_page"],
+                "render_profile": {"mode": "deterministic", "synthesis_slot": "provider_optional"},
                 "status": "planned",
             }
         )
@@ -1756,10 +1782,12 @@ def build_article_plan(config: dict[str, Any], analysis: dict[str, Any]) -> dict
                 "title": title,
                 "priority": priority,
                 "type": "topic",
+                "article_subtype": "topic",
                 "source_entities": [],
                 "source_documents": sorted(item for item in document_ids if item),
                 "recommended_sections": ["Overview", "Evidence-backed claims", "Sources", "Related pages"],
                 "planning_basis": ["section_coverage"],
+                "render_profile": {"mode": "deterministic", "synthesis_slot": "provider_optional"},
                 "status": "planned" if priority in {"A", "B"} else "stub",
             }
         )
@@ -1775,10 +1803,12 @@ def build_article_plan(config: dict[str, Any], analysis: dict[str, Any]) -> dict
                 "title": title,
                 "priority": priority,
                 "type": "concept" if priority in {"A", "B"} else "stub",
+                "article_subtype": "concept" if priority in {"A", "B"} else "stub",
                 "source_entities": [entity.get("id", "")],
                 "source_documents": entity.get("documents", []),
                 "recommended_sections": ["Overview", "Evidence-backed claims", "Sources", "Related pages"],
                 "planning_basis": ["entity_mentions"],
+                "render_profile": {"mode": "deterministic", "synthesis_slot": "provider_optional"},
                 "status": "planned" if priority in {"A", "B"} else "stub",
             }
         )
@@ -1791,10 +1821,12 @@ def build_article_plan(config: dict[str, Any], analysis: dict[str, Any]) -> dict
                 "title": f"Source: {doc.get('title', doc.get('document_id', 'Document'))}",
                 "priority": source_priority,
                 "type": "source",
+                "article_subtype": "source",
                 "source_entities": [],
                 "source_documents": [doc.get("document_id", "")],
                 "recommended_sections": ["Source metadata", "Coverage", "Use in wiki"],
                 "planning_basis": ["source_document"],
+                "render_profile": {"mode": "deterministic", "synthesis_slot": "provider_optional"},
                 "status": "planned" if source_priority == "B" else "source-note",
             }
         )
@@ -1937,10 +1969,33 @@ def slugify_title(value: str, fallback: str) -> str:
     return slug or fallback
 
 
+def claim_segment_id(claim: dict[str, Any]) -> str:
+    return str(claim.get("evidence_segment_id") or claim.get("segment_id") or claim.get("chunk_id") or "")
+
+
 def claims_for_candidate(candidate: dict[str, Any], analysis: dict[str, Any]) -> list[dict[str, Any]]:
     title_key = str(candidate.get("title", "")).casefold()
-    documents = set(candidate.get("source_documents", []))
+    subtype = str(candidate.get("article_subtype") or article_subtype_for_title(str(candidate.get("title", "")), str(candidate.get("type", ""))))
+    documents = {str(item) for item in candidate.get("source_documents", []) if str(item)}
     claims = analysis.get("claims", [])
+    if subtype == "timeline":
+        matched = [claim for claim in claims if claim.get("predicate") == "mentions_year" and (not documents or str(claim.get("source_document_id", "")) in documents)]
+        return matched[:24] if matched else [claim for claim in claims if claim.get("predicate") == "mentions_year"][:24]
+    if subtype == "source":
+        return [claim for claim in claims if str(claim.get("source_document_id", "")) in documents][:24]
+    if subtype == "concept":
+        exact = [claim for claim in claims if str(claim.get("subject", "")).casefold() == title_key]
+        if exact:
+            return exact[:16]
+    if subtype == "topic":
+        section = [
+            claim
+            for claim in claims
+            if claim.get("predicate") == "has_section"
+            and str(claim.get("object", "")).casefold() == title_key
+        ]
+        if section:
+            return section[:16]
     matched = [
         claim
         for claim in claims
@@ -1972,6 +2027,20 @@ def source_refs_for_claims(claims: list[dict[str, Any]], segments: list[dict[str
     return refs
 
 
+def source_refs_for_documents(document_ids: set[str], segments: list[dict[str, Any]]) -> list[dict[str, str]]:
+    refs: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for segment in segments:
+        if not isinstance(segment, dict) or source_document_id(segment) not in document_ids:
+            continue
+        ref = public_source_ref(segment)
+        key = ref.get("segment_id") or ref.get("document_id")
+        if key and key not in seen:
+            refs.append(ref)
+            seen.add(key)
+    return refs
+
+
 def format_source_ref(ref: dict[str, str]) -> str:
     label = ref.get("title") or ref.get("source_label") or ref.get("document_id") or "Source"
     extras = []
@@ -1991,53 +2060,283 @@ def format_source_ref(ref: dict[str, str]) -> str:
     return f"- {label}{suffix}"
 
 
-def render_article(candidate: dict[str, Any], claims: list[dict[str, Any]], refs: list[dict[str, str]], related: list[str]) -> str:
-    title = str(candidate.get("title") or "Untitled")
-    lines = [
+def format_claim_bullet(claim: dict[str, Any]) -> str:
+    predicate = str(claim.get("predicate", "related_to")).replace("_", " ")
+    subject = claim.get("subject", "[unresolved]")
+    obj = claim.get("object", "[unresolved]")
+    segment = claim_segment_id(claim)
+    citation = f" [`{segment}`]" if segment else ""
+    return f"- {subject} {predicate} {obj}.{citation}"
+
+
+def source_documents_by_id(analysis: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    docs = analysis.get("corpus_inventory", {}).get("documents", [])
+    return {str(doc.get("document_id") or doc.get("source_document_id") or ""): doc for doc in docs if isinstance(doc, dict)}
+
+
+def segments_for_documents(segments: list[dict[str, Any]], document_ids: set[str]) -> list[dict[str, Any]]:
+    return [segment for segment in segments if isinstance(segment, dict) and source_document_id(segment) in document_ids]
+
+
+def source_ref_for_document(doc: dict[str, Any], segments: list[dict[str, Any]]) -> dict[str, str]:
+    doc_id = str(doc.get("document_id") or doc.get("source_document_id") or "")
+    for segment in segments:
+        if isinstance(segment, dict) and source_document_id(segment) == doc_id:
+            return public_source_ref(segment)
+    source = doc.get("source", {})
+    return source if isinstance(source, dict) else {}
+
+
+def related_pages_block(ctx: dict[str, Any]) -> list[str]:
+    title = ctx["title"]
+    related = [item for item in ctx.get("related_titles", []) if item and item != title]
+    if not related:
+        return []
+    return ["## Related pages", "", *[f"- [[{item}]]" for item in related[:8]], ""]
+
+
+def sources_block(refs: list[dict[str, str]]) -> list[str]:
+    if not refs:
+        return []
+    return ["## Sources", "", *[format_source_ref(ref) for ref in refs], ""]
+
+
+def claim_block(claims: list[dict[str, Any]], *, heading: str = "Evidence-backed claims", limit: int = 8) -> list[str]:
+    if not claims:
+        return []
+    return [f"## {heading}", "", *[format_claim_bullet(claim) for claim in claims[:limit]], ""]
+
+
+def render_frontmatter(ctx: dict[str, Any]) -> list[str]:
+    candidate = ctx["candidate"]
+    return [
         "---",
         f"uuid: {uuid.uuid4()}",
-        f"title: {title}",
+        f"title: {ctx['title']}",
         f"priority: {candidate.get('priority', '')}",
         f"article_type: {candidate.get('type', '')}",
+        f"article_subtype: {ctx['subtype']}",
         "epistemic: \"#derived\"",
         f"updated_at: {now_iso()}",
         "---",
         "",
-        f"# {title}",
-        "",
-        "## Overview",
-        "",
-        f"{title} is a generated Wissenswerk article compiled from the prepared corpus. It should be reviewed against the cited sources before publication-sensitive use.",
+        f"# {ctx['title']}",
         "",
     ]
-    if claims:
-        lines.extend(["## Evidence-backed claims", ""])
-        for claim in claims[:8]:
-            predicate = str(claim.get("predicate", "related_to")).replace("_", " ")
-            subject = claim.get("subject", title)
-            obj = claim.get("object", "[unresolved]")
-            segment = claim.get("evidence_segment_id") or claim.get("segment_id") or claim.get("chunk_id", "")
-            citation = f" [`{segment}`]" if segment else ""
-            lines.append(f"- {subject} {predicate} {obj}.{citation}")
+
+
+def render_overview_article(ctx: dict[str, Any]) -> list[str]:
+    analysis = ctx["analysis"]
+    inventory = analysis.get("corpus_inventory", {})
+    coverage = analysis.get("source_coverage", {})
+    entities = analysis.get("entities", [])[:8]
+    lines = render_frontmatter(ctx)
+    lines.extend(
+        [
+            "## Overview",
+            "",
+            f"This generated overview is compiled from {inventory.get('documents_total', 0)} source document(s) and {inventory.get('segments_total', 0)} evidence segment(s). It is a deterministic draft for review before publication-sensitive use.",
+            "",
+            "## Corpus coverage",
+            "",
+            f"- Source documents: {inventory.get('documents_total', 0)}",
+            f"- Evidence segments: {inventory.get('segments_total', 0)}",
+            f"- Documents with source references: {coverage.get('documents_with_source_ref', 0)}",
+            f"- Segments with hashes: {coverage.get('segments_with_hash', 0)}",
+            "",
+        ]
+    )
+    if entities:
+        lines.extend(["## Top concepts", "", *[f"- {entity.get('name', '')} ({entity.get('mentions', 0)} mention(s))" for entity in entities], ""])
+    lines.extend(claim_block(ctx["claims"], limit=8))
+    lines.extend(sources_block(ctx["refs"]))
+    lines.extend(related_pages_block(ctx))
+    return lines
+
+
+def render_timeline_article(ctx: dict[str, Any]) -> list[str]:
+    lines = render_frontmatter(ctx)
+    timeline_claims = [claim for claim in ctx["claims"] if claim.get("predicate") == "mentions_year"]
+    by_year: dict[str, list[dict[str, Any]]] = {}
+    for claim in timeline_claims:
+        by_year.setdefault(str(claim.get("object") or "[undated]"), []).append(claim)
+    lines.extend(["## Timeline", ""])
+    if by_year:
+        for year in sorted(by_year):
+            lines.extend([f"### {year}", ""])
+            lines.extend(format_claim_bullet(claim) for claim in by_year[year])
+            lines.append("")
+    else:
+        lines.extend(["- No explicit year claims were extracted for this page.", ""])
+    lines.extend(["## Chronology notes", "", "- Review whether repeated or conflicting years represent a sequence, a date range, or a source conflict.", ""])
+    lines.extend(sources_block(ctx["refs"]))
+    lines.extend(related_pages_block(ctx))
+    return lines
+
+
+def render_source_article(ctx: dict[str, Any]) -> list[str]:
+    candidate = ctx["candidate"]
+    document_ids = {str(item) for item in candidate.get("source_documents", []) if str(item)}
+    docs = source_documents_by_id(ctx["analysis"])
+    segments = segments_for_documents(ctx["segments"], document_ids)
+    doc = docs.get(next(iter(document_ids), ""), {})
+    ref = source_ref_for_document(doc, ctx["segments"]) if doc else (ctx["refs"][0] if ctx["refs"] else {})
+    lines = render_frontmatter(ctx)
+    lines.extend(["## Source metadata", ""])
+    metadata = [
+        ("Document ID", ref.get("document_id") or next(iter(document_ids), "")),
+        ("Title", ref.get("title") or doc.get("title", "")),
+        ("Author", ref.get("author", "")),
+        ("Year", ref.get("year", "")),
+        ("Archive ID", ref.get("archive_id", "")),
+        ("Source URL", ref.get("source_url", "")),
+        ("Rights", ref.get("rights", "")),
+    ]
+    lines.extend(f"- {label}: {value or '[unknown]'}" for label, value in metadata)
+    lines.extend(["", "## Coverage", "", f"- Evidence segments: {len(segments)}"])
+    sections = sorted({str(segment.get("section")) for segment in segments if segment.get("section")})
+    if sections:
+        lines.extend(f"- Section: {section}" for section in sections)
+    lines.append("")
+    lines.extend(claim_block(ctx["claims"], heading="Claims supported by this source", limit=12))
+    lines.extend(["## Provenance notes", "", "- This page publishes source metadata and evidence references, not private full-text source material.", ""])
+    lines.extend(sources_block(ctx["refs"]))
+    lines.extend(related_pages_block(ctx))
+    return lines
+
+
+def render_topic_article(ctx: dict[str, Any]) -> list[str]:
+    document_ids = {str(item) for item in ctx["candidate"].get("source_documents", []) if str(item)}
+    lines = render_frontmatter(ctx)
+    lines.extend(["## Topic coverage", "", f"- Supporting source documents: {len(document_ids)}", f"- Supporting evidence references: {len(ctx['refs'])}", ""])
+    lines.extend(claim_block(ctx["claims"], limit=10))
+    lines.extend(["## Open questions", "", "- Review whether this topic should remain a standalone page or merge into a broader article.", ""])
+    lines.extend(sources_block(ctx["refs"]))
+    lines.extend(related_pages_block(ctx))
+    return lines
+
+
+def render_concept_article(ctx: dict[str, Any]) -> list[str]:
+    lines = render_frontmatter(ctx)
+    mentioned = [claim for claim in ctx["claims"] if claim.get("predicate") == "mentioned_in"]
+    document_count = len({claim.get("source_document_id") for claim in ctx["claims"] if claim.get("source_document_id")})
+    lines.extend(["## Concept summary", "", f"This concept appears in {document_count} source document(s).", ""])
+    lines.extend(claim_block(mentioned or ctx["claims"], limit=10))
+    lines.extend(["## Related source documents", ""])
+    source_titles = sorted({str(claim.get("object")) for claim in mentioned if claim.get("object")})
+    if source_titles:
+        lines.extend(f"- {title}" for title in source_titles[:12])
+    else:
+        lines.append("- [unresolved]")
+    lines.append("")
+    lines.extend(sources_block(ctx["refs"]))
+    lines.extend(related_pages_block(ctx))
+    return lines
+
+
+def render_navigation_article(ctx: dict[str, Any]) -> list[str]:
+    subtype = ctx["subtype"]
+    heading = {
+        "places_buildings": "Places and buildings",
+        "institutions": "Institutions",
+        "people_families": "People and families",
+        "glossary": "Glossary",
+    }.get(subtype, "Navigation")
+    lines = render_frontmatter(ctx)
+    lines.extend([f"## {heading}", "", "This generated navigation page groups source-backed entries for review.", ""])
+    entities = ctx["analysis"].get("entities", [])[:20]
+    if subtype == "glossary":
+        lines.extend(["## Terms", ""])
+        lines.extend(f"- {entity.get('name', '')}: mentioned in {len(entity.get('documents', []))} source document(s)." for entity in entities)
         lines.append("")
-    if candidate.get("priority") in {"A", "B"}:
-        lines.extend(
-            [
-                "## Historical context",
-                "",
-                "This section is intentionally conservative in the bootstrap compiler. Expand it with a stronger synthesis model after verification.",
-                "",
-            ]
-        )
-    lines.extend(["## Open questions", "", "- Review whether the generated scope, terminology, and source coverage are sufficient.", ""])
-    if refs:
-        lines.extend(["## Sources", ""])
-        lines.extend(format_source_ref(ref) for ref in refs)
+    else:
+        lines.extend(["## Candidate entries", ""])
+        entries = [title for title in ctx.get("related_titles", [])[:12] if title != ctx["title"]]
+        lines.extend(f"- [[{title}]]" for title in entries) if entries else lines.append("- [unresolved]")
         lines.append("")
-    if related:
-        lines.extend(["## Related pages", ""])
-        lines.extend(f"- [[{item}]]" for item in related[:8] if item != title)
-        lines.append("")
+    lines.extend(claim_block(ctx["claims"], limit=6))
+    lines.extend(sources_block(ctx["refs"]))
+    return lines
+
+
+def render_sources_overview_article(ctx: dict[str, Any]) -> list[str]:
+    docs = ctx["analysis"].get("corpus_inventory", {}).get("documents", [])
+    coverage = ctx["analysis"].get("source_coverage", {})
+    lines = render_frontmatter(ctx)
+    lines.extend(
+        [
+            "## Source coverage",
+            "",
+            f"- Source documents: {len(docs)}",
+            f"- Documents with source references: {coverage.get('documents_with_source_ref', 0)}",
+            f"- Segments with hashes: {coverage.get('segments_with_hash', 0)}",
+            "",
+            "## Source documents",
+            "",
+        ]
+    )
+    for doc in docs:
+        source = doc.get("source", {}) if isinstance(doc, dict) else {}
+        source_label = source.get("source_label") or source.get("source_url") or source.get("archive_id") or "[locator unresolved]"
+        lines.append(f"- {doc.get('title', doc.get('document_id', 'Document'))}: {doc.get('segments', 0)} segment(s), {source_label}")
+    lines.extend(["", "## Rights and provenance gaps", ""])
+    optional_missing = coverage.get("optional_missing", {})
+    if optional_missing:
+        lines.extend(f"- Missing `{field}` on {count} segment(s)." for field, count in sorted(optional_missing.items()))
+    else:
+        lines.append("- No optional metadata gaps were recorded.")
+    lines.append("")
+    lines.extend(sources_block(ctx["refs"]))
+    lines.extend(related_pages_block(ctx))
+    return lines
+
+
+def build_render_context(
+    config: dict[str, Any],
+    candidate: dict[str, Any],
+    claims: list[dict[str, Any]],
+    refs: list[dict[str, str]],
+    related: list[str],
+    analysis: dict[str, Any],
+    segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    title = str(candidate.get("title") or "Untitled")
+    subtype = str(candidate.get("article_subtype") or article_subtype_for_title(title, str(candidate.get("type", ""))))
+    return {
+        "config": config,
+        "candidate": candidate,
+        "title": title,
+        "subtype": subtype,
+        "claims": claims,
+        "refs": refs,
+        "related_titles": related,
+        "analysis": analysis,
+        "segments": segments,
+        "render_blocks": {
+            "mode": "deterministic",
+            "synthesis_slot": "provider_optional",
+            "provider_invoked": False,
+        },
+    }
+
+
+def render_article(ctx: dict[str, Any]) -> str:
+    subtype = ctx["subtype"]
+    candidate_type = str(ctx["candidate"].get("type", ""))
+    if subtype == "timeline":
+        lines = render_timeline_article(ctx)
+    elif subtype == "source":
+        lines = render_source_article(ctx)
+    elif subtype == "sources_overview":
+        lines = render_sources_overview_article(ctx)
+    elif subtype in {"places_buildings", "institutions", "people_families", "glossary"}:
+        lines = render_navigation_article(ctx)
+    elif candidate_type == "topic" or subtype == "topic":
+        lines = render_topic_article(ctx)
+    elif candidate_type == "concept" or subtype == "concept":
+        lines = render_concept_article(ctx)
+    else:
+        lines = render_overview_article(ctx)
     return "\n".join(lines)
 
 
@@ -2094,9 +2393,12 @@ def command_build(args: argparse.Namespace) -> int:
             slug = slugify_title(title, f"article_{index}")
             claims = claims_for_candidate(candidate, analysis)
             refs = source_refs_for_claims(claims, segments)
+            if not refs:
+                refs = source_refs_for_documents({str(item) for item in candidate.get("source_documents", []) if str(item)}, segments)
+            render_context = build_render_context(config, candidate, claims, refs, titles, analysis, segments)
             article_path = wiki_root / "Articles" / f"{slug}.md"
             provenance_path = wiki_root / "Articles" / f"{slug}.provenance.json"
-            article_path.write_text(render_article(candidate, claims, refs, titles), encoding="utf-8")
+            article_path.write_text(render_article(render_context), encoding="utf-8")
             write_json(
                 provenance_path,
                 {
@@ -2104,6 +2406,7 @@ def command_build(args: argparse.Namespace) -> int:
                     "generated_at": now_iso(),
                     "article": title,
                     "candidate": candidate,
+                    "render_profile": render_context["render_blocks"],
                     "claims": claims,
                     "sources": refs,
                     "source_import": rel(state_path) if state_path else "",
@@ -2466,7 +2769,7 @@ def report_hygiene_inventory() -> dict[str, Any]:
             "Do not include generated logs, legacy coordination state, archive indexes, runtime caches, or local archives in the public repository.",
             "Keep reports runtime-generated and ignored; commit only stable contracts, fixtures, and documentation dossiers.",
             "Use `./wissenswerk.py task digest --json` for active coordination instead of publishing local task state.",
-            "Use export plan as the publishable-branch gate before creating a fresh repository.",
+            "Use doctor, test, hygiene reports, and git diff checks as the direct repository release gate.",
         ],
     }
 
@@ -2486,222 +2789,6 @@ def print_hygiene_reports(payload: dict[str, Any]) -> None:
         )
 
 
-def flatten_manifest_paths(section: Any) -> list[str]:
-    paths: list[str] = []
-    if isinstance(section, dict):
-        for value in section.values():
-            paths.extend(flatten_manifest_paths(value))
-    elif isinstance(section, list):
-        for value in section:
-            paths.extend(flatten_manifest_paths(value))
-    elif isinstance(section, str):
-        paths.append(section)
-    return paths
-
-
-def is_exportable_manifest_file(path: Path) -> bool:
-    parts = set(path.parts)
-    if "__pycache__" in parts:
-        return False
-    if path.suffix in {".pyc", ".pyo"}:
-        return False
-    return True
-
-
-def expand_manifest_path(value: str, *, include_files: bool) -> dict[str, Any]:
-    path = repo_path(value)
-    if any(char in value for char in "*?[]"):
-        matches = sorted(REPO_ROOT.glob(value))
-    elif path.exists():
-        matches = [path]
-    else:
-        matches = []
-    files = []
-    for match in matches:
-        if match.is_dir():
-            files.extend(sorted(child for child in match.rglob("*") if child.is_file() and is_exportable_manifest_file(child)))
-        elif match.is_file() and is_exportable_manifest_file(match):
-            files.append(match)
-    return {
-        "spec": value,
-        "exists": bool(matches),
-        "files": [rel(file_path) for file_path in files] if include_files else [],
-        "file_count": len(files),
-    }
-
-
-def manifest_spec_matches_file(spec: str, file_path: str) -> bool:
-    if any(char in spec for char in "*?[]"):
-        return Path(file_path).match(spec)
-    if spec.endswith("/"):
-        return file_path.startswith(spec)
-    spec_path = repo_path(spec)
-    if spec_path.is_dir():
-        normalized = spec.rstrip("/") + "/"
-        return file_path.startswith(normalized)
-    return file_path == spec
-
-
-def manifest_requirement_satisfied(requirement: str, include_specs: list[str], included_files: list[str]) -> bool:
-    if requirement in include_specs or requirement in included_files:
-        return True
-    if requirement.endswith("/"):
-        return any(file_path.startswith(requirement) for file_path in included_files)
-    return False
-
-
-def public_safety_findings(manifest: dict[str, Any], included_files: list[str]) -> list[dict[str, Any]]:
-    safety = manifest.get("public_safety", {})
-    scan_specs = flatten_manifest_paths(safety.get("scan_specs", []))
-    patterns = safety.get("forbidden_patterns", [])
-    if not isinstance(patterns, list):
-        return []
-    scan_entries = [expand_manifest_path(spec, include_files=True) for spec in scan_specs]
-    scan_files = sorted({file for entry in scan_entries for file in entry["files"] if file in included_files})
-    findings: list[dict[str, Any]] = []
-    for file_path in scan_files:
-        try:
-            raw = repo_path(file_path).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        for item in patterns:
-            if not isinstance(item, dict):
-                continue
-            pattern = str(item.get("pattern", ""))
-            if pattern and pattern in raw:
-                findings.append(
-                    {
-                        "kind": "public_forbidden_pattern",
-                        "file": file_path,
-                        "pattern": pattern,
-                        "description": item.get("description", ""),
-                    }
-                )
-    return findings
-
-
-def rewrite_manifest_strings(value: Any, mappings: dict[str, str]) -> Any:
-    if isinstance(value, dict):
-        return {key: rewrite_manifest_strings(item, mappings) for key, item in value.items()}
-    if isinstance(value, list):
-        return [rewrite_manifest_strings(item, mappings) for item in value]
-    if isinstance(value, str):
-        return mappings.get(value, value)
-    return value
-
-
-def materialized_manifest_payload(manifest_path: Path) -> dict[str, Any]:
-    manifest = load_json_like(manifest_path)
-    mappings = {str(key): str(value) for key, value in manifest.get("export_mappings", {}).items()}
-    rewritten = rewrite_manifest_strings(manifest, mappings)
-    if isinstance(rewritten, dict):
-        rewritten["strategy"] = "standalone"
-        rewritten["status"] = "public_contract"
-        rewritten["export_mappings"] = {}
-        notes = rewritten.get("migration_notes", [])
-        if isinstance(notes, list):
-            rewritten["migration_notes"] = [
-                note
-                for note in notes
-                if isinstance(note, str) and "Map " not in note and "migration branch" not in note
-            ]
-    return rewritten if isinstance(rewritten, dict) else manifest
-
-
-def export_plan(manifest_path: Path) -> dict[str, Any]:
-    manifest = load_json_like(manifest_path)
-    include_specs = flatten_manifest_paths(manifest.get("include", {}))
-    exclude_specs = flatten_manifest_paths(manifest.get("exclude", {}))
-    include_entries = [expand_manifest_path(spec, include_files=True) for spec in include_specs]
-    exclude_entries = [expand_manifest_path(spec, include_files=False) for spec in exclude_specs]
-    missing_required = [entry["spec"] for entry in include_entries if not entry["exists"]]
-    included_files = sorted({file for entry in include_entries for file in entry["files"]})
-    excluded_file_count = sum(int(entry["file_count"]) for entry in exclude_entries)
-    overlap = sorted(
-        {
-            file_path
-            for file_path in included_files
-            for spec in exclude_specs
-            if manifest_spec_matches_file(spec, file_path)
-        }
-    )
-    gate_findings = []
-    for gate in manifest.get("public_gates", []):
-        if not isinstance(gate, dict):
-            continue
-        missing = [
-            requirement
-            for requirement in gate.get("requires_included", [])
-            if not manifest_requirement_satisfied(str(requirement), include_specs, included_files)
-        ]
-        if missing:
-            gate_findings.append({"kind": "public_gate_missing_inputs", "command": gate.get("command", ""), "missing": missing})
-    safety_findings = public_safety_findings(manifest, included_files)
-    hygiene = report_hygiene_inventory()
-    blockers = []
-    warnings = []
-    if overlap:
-        blockers.append({"kind": "include_exclude_overlap", "paths": overlap})
-    if missing_required:
-        blockers.append({"kind": "missing_include_specs", "paths": missing_required})
-    blockers.extend(gate_findings)
-    blockers.extend(safety_findings)
-    if hygiene["summary"]["tracked_files"]:
-        warnings.append(
-            {
-                "kind": "legacy_report_state_present",
-                "tracked_files": hygiene["summary"]["tracked_files"],
-                "policy": "excluded_from_public_export",
-            }
-        )
-    config = load_config(DEFAULT_CONFIG) if DEFAULT_CONFIG.exists() else default_config_payload()
-    store = default_task_store(config)
-    if store.db_path.exists():
-        blocking_tasks = store.blocking_tasks()
-        if blocking_tasks:
-            warnings.append(
-                {
-                    "kind": "open_coordination_tasks_present",
-                    "blocking": len(blocking_tasks),
-                    "task_ids": [task["id"] for task in blocking_tasks],
-                    "policy": "excluded_from_public_export",
-                }
-            )
-    return {
-        "status": "blocked" if blockers else "ready",
-        "manifest": rel(manifest_path),
-        "public_repo": manifest.get("public_repo", {}),
-        "export_mappings": manifest.get("export_mappings", {}),
-        "public_gates": manifest.get("public_gates", []),
-        "include": include_entries,
-        "exclude": exclude_entries,
-        "summary": {
-            "include_specs": len(include_specs),
-            "include_files_existing": len(included_files),
-            "exclude_specs": len(exclude_specs),
-            "exclude_files_existing": excluded_file_count,
-            "exclude_file_hits_existing": excluded_file_count,
-            "exclude_counting": "spec_hits_may_overlap",
-            "missing_include_specs": missing_required,
-            "overlap": overlap,
-            "public_safety_findings": len(safety_findings),
-        },
-        "report_hygiene": hygiene["summary"],
-        "blockers": blockers,
-        "warnings": warnings,
-        "next_commands": [
-            "./wissenswerk.py hygiene reports --json",
-            "./wissenswerk.py test --json",
-        ],
-    }
-
-
-def command_export_plan(args: argparse.Namespace) -> int:
-    payload = export_plan(repo_path(args.manifest))
-    json_print(payload) if args.json else print_export_plan(payload)
-    return 1 if payload["status"] == "blocked" and args.strict else 0
-
-
 def command_test(args: argparse.Namespace) -> int:
     test_root = repo_path(args.path)
     cmd = [sys.executable, "-m", "unittest", "discover", "-s", rel(test_root)]
@@ -2718,119 +2805,12 @@ def command_test(args: argparse.Namespace) -> int:
     return result.returncode
 
 
-def export_materialize_plan(manifest_path: Path, target: Path) -> dict[str, Any]:
-    plan = export_plan(manifest_path)
-    mappings = plan.get("export_mappings", {})
-    files = sorted({file for entry in plan.get("include", []) for file in entry.get("files", [])})
-    operations = []
-    for file_path in files:
-        destination = mappings.get(file_path, file_path)
-        operations.append({"source": file_path, "destination": str(destination)})
-    return {
-        "status": "blocked" if plan["blockers"] else "ready",
-        "manifest": plan["manifest"],
-        "target": rel(target),
-        "operations": operations,
-        "files_total": len(operations),
-        "blockers": plan["blockers"],
-        "warnings": plan["warnings"],
-    }
-
-
-def command_export_materialize(args: argparse.Namespace) -> int:
-    target = repo_path(args.target)
-    manifest_path = repo_path(args.manifest)
-    payload = export_materialize_plan(manifest_path, target)
-    if payload["blockers"]:
-        json_print(payload) if args.json else print(f"export materialize blocked: {len(payload['blockers'])} blockers")
-        return 1
-    if args.apply:
-        if target.resolve() == REPO_ROOT.resolve():
-            payload["status"] = "blocked"
-            payload["blockers"].append({"kind": "target_is_repository_root", "target": rel(target)})
-            json_print(payload) if args.json else print("Refusing to materialize into repository root")
-            return 1
-        for operation in payload["operations"]:
-            source = repo_path(operation["source"])
-            destination = target / operation["destination"]
-            ensure_dir(destination.parent)
-            if source.resolve() == manifest_path.resolve():
-                destination.write_text(
-                    json.dumps(materialized_manifest_payload(manifest_path), indent=2, ensure_ascii=False) + "\n",
-                    encoding="utf-8",
-                )
-            else:
-                shutil.copy2(source, destination)
-        payload["status"] = "written"
-    else:
-        payload["status"] = "dry-run"
-    json_print(payload) if args.json else print_export_materialize(payload)
-    return 0
-
-
-def run_verification_command(target: Path, command: list[str]) -> dict[str, Any]:
-    result = subprocess.run(command, cwd=target, text=True, capture_output=True, check=False)
-    return {
-        "command": command,
-        "returncode": result.returncode,
-        "status": "pass" if result.returncode == 0 else "fail",
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-    }
-
-
-def command_export_verify(args: argparse.Namespace) -> int:
-    target = repo_path(args.target)
-    commands = [
-        [sys.executable, "-m", "py_compile", "wissenswerk.py"],
-        [sys.executable, "wissenswerk.py", "doctor", "--json"],
-        [sys.executable, "wissenswerk.py", "export", "plan", "--strict", "--json"],
-        [sys.executable, "wissenswerk.py", "test", "--json"],
-        [sys.executable, "-m", "json.tool", "wissenswerk_export_manifest.json"],
-        [sys.executable, "-m", "json.tool", "project_manifest.json"],
-        [sys.executable, "-m", "json.tool", "wissenswerk.yaml"],
-    ]
-    if (target / ".git").exists():
-        commands.append(["git", "diff", "--check"])
-    results = [run_verification_command(target, command) for command in commands]
-    failures = [result for result in results if result["status"] != "pass"]
-    payload = {
-        "status": "fail" if failures else "pass",
-        "target": rel(target),
-        "checks": results,
-        "summary": {"pass": len(results) - len(failures), "fail": len(failures)},
-    }
-    json_print(payload) if args.json else print_export_verify(payload)
-    return 1 if failures else 0
-
-
-def print_export_verify(payload: dict[str, Any]) -> None:
-    print(f"Wissenswerk export verify: {payload['status']}")
-    for check in payload["checks"]:
-        print(f"- {' '.join(check['command'])}: {check['status']}")
-
-
-def print_export_materialize(payload: dict[str, Any]) -> None:
-    print(f"Wissenswerk export materialize: {payload['status']}")
-    print(f"- target: {payload['target']}")
-    print(f"- files: {payload['files_total']}")
-
-
 def print_test(payload: dict[str, Any]) -> None:
     print(f"Wissenswerk tests: {payload['status']}")
     if payload["stdout"]:
         print(payload["stdout"].rstrip())
     if payload["stderr"]:
         print(payload["stderr"].rstrip())
-
-
-def print_export_plan(payload: dict[str, Any]) -> None:
-    print(f"Wissenswerk export plan: {payload['status']}")
-    summary = payload["summary"]
-    print(f"- include specs: {summary['include_specs']} ({summary['include_files_existing']} files)")
-    print(f"- exclude specs: {summary['exclude_specs']} ({summary['exclude_file_hits_existing']} file hits)")
-    for blocker in payload["blockers"]:
-        print(f"- blocker: {blocker['kind']}")
 
 
 def reset_plan(config: dict[str, Any], target: str) -> dict[str, Any]:
@@ -3551,21 +3531,6 @@ def build_parser() -> argparse.ArgumentParser:
     hygiene_reports = hygiene_sub.add_parser("reports", help="Inventory report, archive, and runtime state")
     hygiene_reports.add_argument("--json", action="store_true")
 
-    export = sub.add_parser("export", help="Plan standalone Wissenswerk repository extraction")
-    export_sub = export.add_subparsers(dest="export_command")
-    export_plan_cmd = export_sub.add_parser("plan", help="Dry-run the public repository export manifest")
-    export_plan_cmd.add_argument("--manifest", default=str(DEFAULT_EXPORT_MANIFEST))
-    export_plan_cmd.add_argument("--strict", action="store_true")
-    export_plan_cmd.add_argument("--json", action="store_true")
-    export_materialize = export_sub.add_parser("materialize", help="Copy the public export tree into a target directory")
-    export_materialize.add_argument("--manifest", default=str(DEFAULT_EXPORT_MANIFEST))
-    export_materialize.add_argument("--target", required=True)
-    export_materialize.add_argument("--apply", action="store_true")
-    export_materialize.add_argument("--json", action="store_true")
-    export_verify = export_sub.add_parser("verify", help="Run public export gates inside a materialized target directory")
-    export_verify.add_argument("--target", required=True)
-    export_verify.add_argument("--json", action="store_true")
-
     test_cmd = sub.add_parser("test", help="Run standalone Wissenswerk unit tests")
     test_cmd.add_argument("--path", default="tests")
     test_cmd.add_argument("--json", action="store_true")
@@ -3633,12 +3598,6 @@ def main(argv: list[str] | None = None) -> int:
         return command_run_status(args)
     if args.command == "hygiene" and args.hygiene_command == "reports":
         return command_hygiene_reports(args)
-    if args.command == "export" and args.export_command == "plan":
-        return command_export_plan(args)
-    if args.command == "export" and args.export_command == "materialize":
-        return command_export_materialize(args)
-    if args.command == "export" and args.export_command == "verify":
-        return command_export_verify(args)
     if args.command == "test":
         return command_test(args)
     parser.print_help()
