@@ -12,6 +12,7 @@
   "include": {
     "root_contracts": [
       "AGENTS.md",
+      "HANDOFF_PROMPT.md",
       "DESIGN.md",
       "README.md",
       ".gitignore",
@@ -81,6 +82,7 @@
   "public_safety": {
     "scan_specs": [
       "AGENTS.md",
+      "HANDOFF_PROMPT.md",
       "wissenswerk.yaml",
       "project_manifest.json",
       ".gitignore",

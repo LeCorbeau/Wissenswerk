@@ -27,6 +27,7 @@ TASK_SEVERITIES = {"low", "medium", "high", "critical"}
 TASK_STATUSES = {"submitted", "working", "input-required", "auth-required", "completed", "failed", "canceled", "rejected"}
 TASK_TERMINAL_STATUSES = {"completed", "failed", "canceled", "rejected"}
 TASK_ROLES = {"coordinator", "curator", "verifier", "maintainer"}
+GENERIC_SECTION_TITLES = {"overview", "introduction", "summary", "contents", "content", "notes", "misc", "general"}
 
 
 def now_iso() -> str:
@@ -1399,6 +1400,13 @@ def segment_entities(segment: dict[str, Any]) -> list[str]:
     return extract_terms(str(segment.get("title", "")) + " " + str(segment.get("text", "")))
 
 
+def compact_claim_text(value: str, *, max_chars: int = 180) -> str:
+    text = re.sub(r"\s+", " ", value).strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rsplit(" ", 1)[0].rstrip(".,;:") + "..."
+
+
 def public_source_ref(segment: dict[str, Any]) -> dict[str, str]:
     source_path = str(segment.get("source_path") or "")
     return {
@@ -1416,6 +1424,36 @@ def public_source_ref(segment: dict[str, Any]) -> dict[str, str]:
         "language": str(segment.get("language") or ""),
         "rights": str(segment.get("rights") or ""),
     }
+
+
+def append_claim(
+    claims: list[dict[str, Any]],
+    *,
+    subject: str,
+    predicate: str,
+    object_value: str,
+    document_id: str,
+    segment_id: str,
+    language: str,
+    confidence: float,
+    status: str = "candidate",
+) -> dict[str, Any]:
+    claim = {
+        "id": f"CLAIM-{len(claims) + 1:06d}",
+        "subject": subject,
+        "predicate": predicate,
+        "object": object_value,
+        "source_document_id": document_id,
+        "document_id": document_id,
+        "evidence_segment_id": segment_id,
+        "segment_id": segment_id,
+        "language": language,
+        "confidence": confidence,
+        "quote_policy": "short-or-none",
+        "status": status,
+    }
+    claims.append(claim)
+    return claim
 
 
 def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]], state_path: Path | None) -> dict[str, Any]:
@@ -1472,41 +1510,66 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
             entity["segments"].add(segment_id)
             if language:
                 entity["languages"].add(language)
-            claim_id = f"CLAIM-{len(claims) + 1:06d}"
-            claims.append(
-                {
-                    "id": claim_id,
-                    "subject": name,
-                    "predicate": "mentioned_in",
-                    "object": title,
-                    "source_document_id": document_id,
-                    "document_id": document_id,
-                    "evidence_segment_id": segment_id,
-                    "segment_id": segment_id,
-                    "language": language,
-                    "confidence": 0.72 if segment.get("entities") else 0.55,
-                    "quote_policy": "short-or-none",
-                    "status": "candidate",
-                }
+            append_claim(
+                claims,
+                subject=name,
+                predicate="mentioned_in",
+                object_value=title,
+                document_id=document_id,
+                segment_id=segment_id,
+                language=language,
+                confidence=0.72 if segment.get("entities") else 0.55,
             )
             edges.append({"source": name, "target": title, "type": "mentioned_in"})
+        summary = compact_claim_text(str(segment.get("summary") or ""))
+        if summary:
+            append_claim(
+                claims,
+                subject=title,
+                predicate="summarizes",
+                object_value=summary,
+                document_id=document_id,
+                segment_id=segment_id,
+                language=language,
+                confidence=0.78,
+            )
+            edges.append({"source": title, "target": segment_id, "type": "summarizes"})
+        section = str(segment.get("section") or "").strip()
+        if section:
+            append_claim(
+                claims,
+                subject=title,
+                predicate="has_section",
+                object_value=section,
+                document_id=document_id,
+                segment_id=segment_id,
+                language=language,
+                confidence=0.8,
+            )
+            edges.append({"source": title, "target": section, "type": "has_section"})
+        for keyword in listify(segment.get("keywords"))[:6]:
+            append_claim(
+                claims,
+                subject=title,
+                predicate="has_keyword",
+                object_value=keyword,
+                document_id=document_id,
+                segment_id=segment_id,
+                language=language,
+                confidence=0.7,
+            )
+            edges.append({"source": title, "target": keyword, "type": "has_keyword"})
         years = sorted(set(re.findall(r"\b(1[0-9]{3}|20[0-9]{2})\b", str(segment.get("text", "")))))
         for year in years[:8]:
-            claims.append(
-                {
-                    "id": f"CLAIM-{len(claims) + 1:06d}",
-                    "subject": title,
-                    "predicate": "mentions_year",
-                    "object": year,
-                    "source_document_id": document_id,
-                    "document_id": document_id,
-                    "evidence_segment_id": segment_id,
-                    "segment_id": segment_id,
-                    "language": language,
-                    "confidence": 0.65,
-                    "quote_policy": "short-or-none",
-                    "status": "candidate",
-                }
+            append_claim(
+                claims,
+                subject=title,
+                predicate="mentions_year",
+                object_value=year,
+                document_id=document_id,
+                segment_id=segment_id,
+                language=language,
+                confidence=0.65,
             )
             edges.append({"source": title, "target": year, "type": "related_to"})
     normalized_docs = []
@@ -1650,6 +1713,7 @@ def build_article_plan(config: dict[str, Any], analysis: dict[str, Any]) -> dict
     project_type = str(project.get("type") or "general")
     entities = analysis.get("entities", [])
     docs = analysis.get("corpus_inventory", {}).get("documents", [])
+    claims = analysis.get("claims", [])
     candidates: list[dict[str, Any]] = []
     mandatory = [project_name, f"History of {project_name}", f"Timeline of {project_name}", "Sources Overview"]
     if project_type == "local-history":
@@ -1668,7 +1732,35 @@ def build_article_plan(config: dict[str, Any], analysis: dict[str, Any]) -> dict
                 "source_entities": [],
                 "source_documents": [doc.get("document_id", "") for doc in docs[:5]],
                 "recommended_sections": ["Overview", "Evidence-backed claims", "Historical context", "Open questions", "Sources", "Related pages"],
+                "planning_basis": ["mandatory_profile_page"],
                 "status": "planned",
+            }
+        )
+    section_documents: dict[str, set[str]] = {}
+    for claim in claims:
+        if claim.get("predicate") != "has_section":
+            continue
+        section = str(claim.get("object") or "").strip()
+        if not section or section.casefold() in GENERIC_SECTION_TITLES:
+            continue
+        section_documents.setdefault(section, set()).add(str(claim.get("source_document_id") or ""))
+    for section, document_ids in sorted(section_documents.items(), key=lambda item: (-len(item[1]), item[0].lower()))[:12]:
+        title = section if section.lower().startswith(("source:", "section:")) else f"{section}"
+        if title.casefold() in seen_titles:
+            continue
+        seen_titles.add(title.casefold())
+        priority = "B" if len(document_ids) > 1 or len(docs) <= 3 else "C"
+        candidates.append(
+            {
+                "id": f"ARTICLE-{len(candidates) + 1:04d}",
+                "title": title,
+                "priority": priority,
+                "type": "topic",
+                "source_entities": [],
+                "source_documents": sorted(item for item in document_ids if item),
+                "recommended_sections": ["Overview", "Evidence-backed claims", "Sources", "Related pages"],
+                "planning_basis": ["section_coverage"],
+                "status": "planned" if priority in {"A", "B"} else "stub",
             }
         )
     for entity in entities[:50]:
@@ -1686,21 +1778,24 @@ def build_article_plan(config: dict[str, Any], analysis: dict[str, Any]) -> dict
                 "source_entities": [entity.get("id", "")],
                 "source_documents": entity.get("documents", []),
                 "recommended_sections": ["Overview", "Evidence-backed claims", "Sources", "Related pages"],
+                "planning_basis": ["entity_mentions"],
                 "status": "planned" if priority in {"A", "B"} else "stub",
             }
         )
     source_candidates = []
     for doc in docs:
+        source_priority = "B" if len(docs) <= 3 else "D"
         source_candidates.append(
             {
                 "id": f"ARTICLE-{len(candidates) + len(source_candidates) + 1:04d}",
                 "title": f"Source: {doc.get('title', doc.get('document_id', 'Document'))}",
-                "priority": "D",
+                "priority": source_priority,
                 "type": "source",
                 "source_entities": [],
                 "source_documents": [doc.get("document_id", "")],
                 "recommended_sections": ["Source metadata", "Coverage", "Use in wiki"],
-                "status": "source-note",
+                "planning_basis": ["source_document"],
+                "status": "planned" if source_priority == "B" else "source-note",
             }
         )
     candidates.extend(source_candidates)

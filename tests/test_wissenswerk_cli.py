@@ -267,6 +267,39 @@ class WissenswerkCliContractTests(unittest.TestCase):
             self.assertEqual(payload["source_documents_written"], 1)
             self.assertEqual(payload["evidence_segments_written"], 1)
 
+    def test_analysis_extracts_metadata_claims_and_plans_small_corpus_sources(self):
+        config = wissenswerk.default_config_payload()
+        config["project"]["name"] = "Small Archive"
+        config["project"]["type"] = "local-history"
+        segments = [
+            {
+                "document_id": "doc-1",
+                "segment_id": "doc-1:0001",
+                "title": "Council Notes",
+                "section": "Market Square",
+                "text": "In 1899 the council recorded repairs near the square.",
+                "summary": "Council notes describe repairs near the market square.",
+                "entities": ["Council"],
+                "keywords": ["repairs", "market square"],
+                "source_url": "https://example.test/council-notes",
+                "language": "en",
+            }
+        ]
+
+        analysis = wissenswerk.build_corpus_analysis(config, segments, None)
+        predicates = {claim["predicate"] for claim in analysis["claims"]}
+        self.assertIn("summarizes", predicates)
+        self.assertIn("has_section", predicates)
+        self.assertIn("has_keyword", predicates)
+
+        plan = wissenswerk.build_article_plan(config, analysis)
+        candidates = plan["article_candidates"]
+        by_title = {candidate["title"]: candidate for candidate in candidates}
+        self.assertEqual(by_title["Market Square"]["planning_basis"], ["section_coverage"])
+        self.assertEqual(by_title["Market Square"]["priority"], "B")
+        self.assertEqual(by_title["Source: Council Notes"]["priority"], "B")
+        self.assertEqual(by_title["Source: Council Notes"]["status"], "planned")
+
     def test_demo_release_pipeline_generates_analysis_plan_wiki_and_reports(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -316,9 +349,11 @@ class WissenswerkCliContractTests(unittest.TestCase):
             self.assertTrue(claims)
             self.assertIn("evidence_segment_id", claims[0])
             self.assertNotIn("chunk_id", claims[0])
+            self.assertIn("summarizes", {claim["predicate"] for claim in claims})
             self.assertTrue((root / "analysis" / "graph.json").exists())
             self.assertTrue((root / "article_plans" / "article_plan.json").exists())
             self.assertTrue((root / "wiki" / "Articles").exists())
+            self.assertTrue((root / "wiki" / "Articles" / "Source_Sample_RagPrep_Document.md").exists())
             self.assertTrue(list((root / "wiki" / "Articles").glob("*.provenance.json")))
             self.assertTrue((root / "reports" / "demo_summary.json").exists())
 
