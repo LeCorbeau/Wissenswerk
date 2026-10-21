@@ -6,11 +6,13 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import sqlite3
 import subprocess
 import sys
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -27,6 +29,27 @@ TASK_TERMINAL_STATUSES = {"completed", "failed", "canceled", "rejected"}
 TASK_ROLES = {"coordinator", "curator", "verifier", "maintainer"}
 GENERIC_SECTION_TITLES = {"overview", "introduction", "summary", "contents", "content", "notes", "misc", "general"}
 LOCAL_ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz", ".7z")
+
+# Heuristic priors per extraction method. They are NOT measured probabilities:
+# they only rank candidate claims so a verifier can review the weakest first.
+CLAIM_CONFIDENCE = {
+    "entity_declared": 0.72,
+    "entity_guessed": 0.55,
+    "summary": 0.78,
+    "section": 0.80,
+    "keyword": 0.70,
+    "year": 0.65,
+    "statement": 0.60,
+}
+CLAIM_CONFIDENCE_NOTE = (
+    "Confidence values are heuristic priors per extraction method (see CLAIM_CONFIDENCE), not measured probabilities."
+)
+# A year-like number followed by one of these is a count or amount, not a date.
+NON_YEAR_FOLLOWERS = (
+    "einwohner", "inhabitants", "habitants", "habitantes", "personen", "people", "menschen", "stück", "euro", "eur",
+    "mark", "km", "kg", "%", "m²", "m2", "meter", "metres", "meters", "hectares", "hektar", "hectáreas",
+)
+NON_YEAR_PRECEDERS = ("s.", "seite", "p.", "pp.", "page", "pág.", "nr.", "no.", "§", "art.", "fol.")
 
 
 def now_iso() -> str:
@@ -1056,21 +1079,42 @@ def print_design_lint(payload: dict[str, Any]) -> None:
         print(f"- {finding['severity']}: {finding.get('path', '-')}: {finding['message']}")
 
 
-def iter_ragprep_records(import_dir: Path) -> list[dict[str, Any]]:
+def iter_ragprep_records(import_dir: Path, errors: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Load RagPrep records. Unreadable files/lines are appended to `errors` when given, else raised."""
     records: list[dict[str, Any]] = []
-    files = sorted([p for p in import_dir.rglob("*") if p.suffix.lower() in {".json", ".jsonl"}])
+    files = sorted([p for p in import_dir.rglob("*") if p.is_file() and p.suffix.lower() in {".json", ".jsonl"}])
     for file_path in files:
         if file_path.suffix.lower() == ".jsonl":
-            for line_no, line in enumerate(file_path.read_text(encoding="utf-8").splitlines(), start=1):
-                if not line.strip():
-                    continue
-                item = json.loads(line)
-                if isinstance(item, dict):
-                    item["_ragprep_file"] = rel(file_path)
-                    item["_ragprep_line"] = line_no
-                    records.append(item)
+            try:
+                handle = file_path.open(encoding="utf-8")
+            except OSError as exc:
+                if errors is None:
+                    raise
+                errors.append({"file": rel(file_path), "error": str(exc)})
+                continue
+            with handle:
+                for line_no, line in enumerate(handle, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                        if errors is None:
+                            raise
+                        errors.append({"file": rel(file_path), "line": line_no, "error": str(exc)})
+                        continue
+                    if isinstance(item, dict):
+                        item["_ragprep_file"] = rel(file_path)
+                        item["_ragprep_line"] = line_no
+                        records.append(item)
             continue
-        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+            if errors is None:
+                raise
+            errors.append({"file": rel(file_path), "error": str(exc)})
+            continue
         items: list[Any]
         if isinstance(payload, dict) and isinstance(payload.get("evidence_segments"), list):
             items = payload["evidence_segments"]
@@ -1221,7 +1265,7 @@ def corpus_preview_from_segments(segments: list[dict[str, Any]]) -> dict[str, An
 def discover_corpus_preview(import_dir: Path, default_language: str) -> dict[str, Any]:
     if not import_dir.exists():
         return {"status": "missing", "path": rel(import_dir), "source_documents": 0, "evidence_segments": 0}
-    records = iter_ragprep_records(import_dir)
+    records = iter_ragprep_records(import_dir, [])
     segments = [normalize_evidence_segment(record, default_language) for record in records]
     return {"status": "scanned", "path": rel(import_dir), **corpus_preview_from_segments(segments)}
 
@@ -1234,8 +1278,11 @@ def command_ingest(args: argparse.Namespace) -> int:
         payload = {"status": "fail", "error": f"RagPrep import directory missing: {rel(import_dir)}"}
         json_print(payload) if args.json else print(payload["error"])
         return 2
-    raw_records = iter_ragprep_records(import_dir)
-    progress(f"ingest: loaded {len(raw_records)} raw record(s)")
+    read_errors: list[dict[str, Any]] = []
+    raw_records = iter_ragprep_records(import_dir, read_errors)
+    progress(f"ingest: loaded {len(raw_records)} raw record(s); unreadable entries={len(read_errors)}")
+    skip_unreadable = bool(getattr(args, "skip_unreadable", False))
+    blocking_read_errors = bool(read_errors) and not skip_unreadable
     segments = [normalize_evidence_segment(record, config.get("project", {}).get("language", "de")) for record in raw_records]
     source_documents = source_documents_from_segments(segments)
     validation_findings, metadata_findings = validate_evidence_segments(segments)
@@ -1271,7 +1318,8 @@ def command_ingest(args: argparse.Namespace) -> int:
                 created_by="ingest",
             )
             task_events.append({"trigger": "source_locator_metadata", **result})
-    status = "fail" if validation_findings else "ready"
+    failed = bool(validation_findings) or blocking_read_errors
+    status = "fail" if failed else "ready"
     payload = {
         "status": status,
         "mode": "auto-apply" if args.apply else "dry-run",
@@ -1282,12 +1330,14 @@ def command_ingest(args: argparse.Namespace) -> int:
         "evidence_segments_written": 0,
         "metadata_findings": metadata_findings,
         "validation_findings": validation_findings,
+        "read_errors": read_errors,
+        "skipped_unreadable": skip_unreadable and bool(read_errors),
         "vector_store": config.get("vector_store", {}),
         "tasks": task_events,
         "report_path": "",
         "written": [],
     }
-    if args.apply and not validation_findings:
+    if args.apply and not failed:
         corpus_state_dir = corpus_dir(config)
         ensure_dir(corpus_state_dir)
         source_documents_path = corpus_state_dir / "source_documents.json"
@@ -1318,7 +1368,7 @@ def command_ingest(args: argparse.Namespace) -> int:
     progress(f"ingest: wrote report {rel(report_path)}")
     payload["report_path"] = rel(report_path)
     json_print(payload) if args.json else print(f"{status}: {len(source_documents)} source documents, {len(segments)} evidence segments; report {rel(report_path)}")
-    return 1 if validation_findings else 0
+    return 1 if failed else 0
 
 
 def latest_import_state(config: dict[str, Any]) -> tuple[Path | None, list[dict[str, Any]]]:
@@ -1425,6 +1475,36 @@ def public_source_ref(segment: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def extract_years(text: str) -> list[str]:
+    """Find plausible year mentions (1000-2099), skipping counts, amounts, and page/article numbers."""
+    years: set[str] = set()
+    for match in re.finditer(r"(?<![\d.,/-])(1[0-9]{3}|20[0-9]{2})(?![\d])", text):
+        before = text[max(0, match.start() - 8) : match.start()].lower().rstrip()
+        after = text[match.end() : match.end() + 14].lower().lstrip()
+        if after.startswith(NON_YEAR_FOLLOWERS):
+            continue
+        if before.endswith(NON_YEAR_PRECEDERS):
+            continue
+        years.add(match.group(1))
+    return sorted(years)
+
+
+def split_sentences(text: str) -> list[tuple[int, int, str]]:
+    """Split text into (start, end, sentence) tuples with offsets into the original string."""
+    sentences: list[tuple[int, int, str]] = []
+    start = 0
+    for match in re.finditer(r"(?<=[.!?])\s+(?=[A-ZÀ-ÖØ-Þ\"„»(])|\n{2,}", text):
+        end = match.start()
+        chunk = text[start:end]
+        if chunk.strip():
+            sentences.append((start, end, chunk.strip()))
+        start = match.end()
+    tail = text[start:]
+    if tail.strip():
+        sentences.append((start, len(text), tail.strip()))
+    return sentences
+
+
 def append_claim(
     claims: list[dict[str, Any]],
     *,
@@ -1436,9 +1516,12 @@ def append_claim(
     language: str,
     confidence: float,
     status: str = "candidate",
+    claim_kind: str = "metadata_fact",
+    quote_span: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     claim = {
         "id": f"CLAIM-{len(claims) + 1:06d}",
+        "claim_kind": claim_kind,
         "subject": subject,
         "predicate": predicate,
         "object": object_value,
@@ -1451,6 +1534,8 @@ def append_claim(
         "quote_policy": "short-or-none",
         "status": status,
     }
+    if quote_span is not None:
+        claim["quote_span"] = [quote_span[0], quote_span[1]]
     claims.append(claim)
     return claim
 
@@ -1464,7 +1549,7 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
     optional_missing: dict[str, int] = {}
     required_findings, metadata_findings = validate_evidence_segments(segments)
     optional_fields = config.get("ragprep", {}).get("optional_fields", [])
-    for segment_index, segment in enumerate(segments, start=1):
+    for segment in segments:
         if not isinstance(segment, dict):
             continue
         document_id = source_document_id(segment) or "unknown"
@@ -1517,7 +1602,7 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
                 document_id=document_id,
                 segment_id=segment_id,
                 language=language,
-                confidence=0.72 if segment.get("entities") else 0.55,
+                confidence=CLAIM_CONFIDENCE["entity_declared"] if segment.get("entities") else CLAIM_CONFIDENCE["entity_guessed"],
             )
             edges.append({"source": name, "target": title, "type": "mentioned_in"})
         summary = compact_claim_text(str(segment.get("summary") or ""))
@@ -1530,7 +1615,7 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
                 document_id=document_id,
                 segment_id=segment_id,
                 language=language,
-                confidence=0.78,
+                confidence=CLAIM_CONFIDENCE["summary"],
             )
             edges.append({"source": title, "target": segment_id, "type": "summarizes"})
         section = str(segment.get("section") or "").strip()
@@ -1543,7 +1628,7 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
                 document_id=document_id,
                 segment_id=segment_id,
                 language=language,
-                confidence=0.8,
+                confidence=CLAIM_CONFIDENCE["section"],
             )
             edges.append({"source": title, "target": section, "type": "has_section"})
         for keyword in listify(segment.get("keywords"))[:6]:
@@ -1555,11 +1640,11 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
                 document_id=document_id,
                 segment_id=segment_id,
                 language=language,
-                confidence=0.7,
+                confidence=CLAIM_CONFIDENCE["keyword"],
             )
             edges.append({"source": title, "target": keyword, "type": "has_keyword"})
-        years = sorted(set(re.findall(r"\b(1[0-9]{3}|20[0-9]{2})\b", str(segment.get("text", "")))))
-        for year in years[:8]:
+        segment_text = str(segment.get("text", ""))
+        for year in extract_years(segment_text)[:8]:
             append_claim(
                 claims,
                 subject=title,
@@ -1568,9 +1653,35 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
                 document_id=document_id,
                 segment_id=segment_id,
                 language=language,
-                confidence=0.65,
+                confidence=CLAIM_CONFIDENCE["year"],
             )
             edges.append({"source": title, "target": year, "type": "related_to"})
+        # Statement claims: whole source sentences that mention a known entity, quoted with
+        # character offsets into the evidence segment so a verifier can check them directly.
+        statements = 0
+        for start, end, sentence in split_sentences(segment_text):
+            if statements >= 6:
+                break
+            if len(sentence) < 25:
+                continue
+            lowered = sentence.casefold()
+            subject_name = next((name for name in names if name.casefold() in lowered), "")
+            if not subject_name:
+                continue
+            append_claim(
+                claims,
+                subject=subject_name,
+                predicate="states",
+                object_value=compact_claim_text(sentence, max_chars=240),
+                document_id=document_id,
+                segment_id=segment_id,
+                language=language,
+                confidence=CLAIM_CONFIDENCE["statement"],
+                claim_kind="statement",
+                quote_span=(start, end),
+            )
+            edges.append({"source": subject_name, "target": segment_id, "type": "stated_in"})
+            statements += 1
     normalized_docs = []
     for doc in documents.values():
         doc["sections"] = sorted(doc["sections"])
@@ -1582,19 +1693,28 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
         entity["languages"] = sorted(entity["languages"])
         normalized_entities.append(entity)
     conflicts = []
-    year_claims: dict[str, set[str]] = {}
+    # A conflict candidate needs two different documents that tie the same entity to
+    # disjoint sets of years. Several years inside one document are usually chronology.
+    entity_years: dict[str, dict[str, set[str]]] = {}
     for claim in claims:
-        if claim["predicate"] == "mentions_year":
-            year_claims.setdefault(claim["subject"], set()).add(claim["object"])
-    for subject, years in sorted(year_claims.items()):
-        if len(years) > 1:
+        if claim.get("claim_kind") != "statement":
+            continue
+        found = extract_years(str(claim.get("object", "")))
+        if found:
+            entity_years.setdefault(claim["subject"], {}).setdefault(claim["source_document_id"], set()).update(found)
+    for subject, by_document in sorted(entity_years.items()):
+        if len(by_document) < 2:
+            continue
+        year_sets = list(by_document.values())
+        if all(a.isdisjoint(b) for index, a in enumerate(year_sets) for b in year_sets[index + 1 :]):
             conflicts.append(
                 {
-                    "type": "date_context_review",
+                    "type": "date_conflict_candidate",
                     "subject": subject,
-                    "values": sorted(years),
-                    "severity": "low",
-                    "note": "Multiple years mentioned for the same source/topic; verifier should decide whether this is chronology or conflict.",
+                    "values": sorted(set().union(*year_sets)),
+                    "documents": sorted(by_document),
+                    "severity": "medium",
+                    "note": "Different documents give disjoint years for the same entity; a verifier should decide whether this is a conflict or different events.",
                 }
             )
     return {
@@ -1610,6 +1730,8 @@ def build_corpus_analysis(config: dict[str, Any], segments: list[dict[str, Any]]
         },
         "entities": sorted(normalized_entities, key=lambda item: (-item["mentions"], item["name"].lower())),
         "claims": claims,
+        "claim_kinds": {kind: sum(1 for claim in claims if claim.get("claim_kind") == kind) for kind in sorted({claim.get("claim_kind", "") for claim in claims})},
+        "confidence_note": CLAIM_CONFIDENCE_NOTE,
         "concept_graph": {
             "nodes": [{"id": entity["name"], "type": "entity"} for entity in normalized_entities]
             + [{"id": doc["title"], "type": "source_document"} for doc in normalized_docs]
@@ -2067,7 +2189,8 @@ def format_claim_bullet(claim: dict[str, Any]) -> str:
     obj = claim.get("object", "[unresolved]")
     segment = claim_segment_id(claim)
     citation = f" [`{segment}`]" if segment else ""
-    return f"- {subject} {predicate} {obj}.{citation}"
+    ending = "" if str(obj).rstrip().endswith((".", "!", "?")) else "."
+    return f"- {subject} {predicate} {obj}{ending}{citation}"
 
 
 def source_documents_by_id(analysis: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -2684,6 +2807,54 @@ def run_git_ls_files(paths: list[str] | None = None) -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def git_ignores(path: Path) -> bool:
+    """Return True when git would ignore `path` (False if git is unavailable)."""
+    probe = path if path.exists() else path / ".probe"
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", str(probe)], cwd=REPO_ROOT, text=True, capture_output=True, check=False
+    )
+    return result.returncode == 0
+
+
+def pages_workflow_text(wiki_dir: str) -> str:
+    """GitHub Pages workflow that publishes the (tracked) wiki directory as-is."""
+    return "\n".join(
+        [
+            "name: Publish Wissenswerk Pages",
+            "",
+            "on:",
+            "  push:",
+            "    branches: [main]",
+            "  workflow_dispatch:",
+            "",
+            "permissions:",
+            "  contents: read",
+            "  pages: write",
+            "  id-token: write",
+            "",
+            "concurrency:",
+            "  group: pages",
+            "  cancel-in-progress: true",
+            "",
+            "jobs:",
+            "  pages:",
+            "    runs-on: ubuntu-latest",
+            "    environment:",
+            "      name: github-pages",
+            "      url: ${{ steps.deployment.outputs.page_url }}",
+            "    steps:",
+            "      - uses: actions/checkout@v4",
+            "      - uses: actions/configure-pages@v5",
+            "      - uses: actions/upload-pages-artifact@v3",
+            "        with:",
+            f"          path: {wiki_dir}",
+            "      - id: deployment",
+            "        uses: actions/deploy-pages@v4",
+            "",
+        ]
+    )
+
+
 def tracked_local_archives(files: list[str]) -> list[str]:
     return sorted(file_path for file_path in files if file_path.casefold().endswith(LOCAL_ARCHIVE_SUFFIXES))
 
@@ -2842,7 +3013,7 @@ def reset_plan(config: dict[str, Any], target: str) -> dict[str, Any]:
     specs: dict[str, dict[str, Any]] = {
         "memory": {
             "affected_paths": existing_path_specs([runtime_state / "memory"]),
-            "protected_paths": ["Logs/Archive/SESSION_MEMORY_*.md"],
+            "protected_paths": [rel(corpus_state), rel(wiki_root)],
             "stale_indexes": [],
             "next_commands": ["./wissenswerk.py doctor --json"],
         },
@@ -2850,7 +3021,7 @@ def reset_plan(config: dict[str, Any], target: str) -> dict[str, Any]:
             "affected_paths": existing_path_specs([runtime_state / "index", runtime_state / "legacy_vector_cache"]),
             "virtual_targets": [config.get("vector_store", {})],
             "protected_paths": [rel(corpus_state), rel(wiki_root)],
-            "stale_indexes": ["pgvector", "lexical-bootstrap"],
+            "stale_indexes": ["pgvector", "lexical-bm25"],
             "next_commands": ["./wissenswerk.py ingest --from-ragprep <dir> --apply --json"],
         },
         "generated": {
@@ -2880,11 +3051,46 @@ def remove_path(path: Path) -> None:
         path.unlink()
 
 
+DEFAULT_RESET_CONFIRM_TOKEN = "APPLY-WISSENSWERK"
+DEFAULT_WIPE_CONFIRM_TOKEN = "WIPE-WISSENSWERK"
+
+
+def confirm_token(config: dict[str, Any], kind: str) -> str:
+    """Confirmation token for destructive commands; configurable, never echoed in output."""
+    policy = config.get("reset_policy", {})
+    if kind == "wipe":
+        return str(policy.get("wipe_all_confirm_token") or DEFAULT_WIPE_CONFIRM_TOKEN)
+    return str(policy.get("reset_apply_confirm_token") or DEFAULT_RESET_CONFIRM_TOKEN)
+
+
+def removal_guard(config: dict[str, Any], value: str) -> str | None:
+    """Return a reason when `value` must never be removed, otherwise None.
+
+    Refuses paths outside the repository, the repository root itself, anything
+    that is, contains, or lies inside a configured source directory, and the
+    root contract files.
+    """
+    path = repo_path(value).resolve()
+    root = REPO_ROOT.resolve()
+    if path == root or path in root.parents:
+        return "is the repository root or one of its parents"
+    if root not in path.parents:
+        return "is outside the repository"
+    protected_files = {root / name for name in ("wissenswerk.yaml", "project_manifest.json", "AGENTS.md", "DESIGN.md", "wissenswerk.py")}
+    if path in protected_files:
+        return "is a protected contract file"
+    for source in config.get("paths", {}).get("sources", []):
+        source_path = repo_path(source).resolve()
+        if path == source_path or source_path in path.parents or path in source_path.parents:
+            return f"overlaps protected source path `{source}`"
+    return None
+
+
 def command_reset(args: argparse.Namespace) -> int:
     config = load_config(repo_path(args.config))
     plan = reset_plan(config, args.target)
     dry_run = bool(args.dry_run or not args.apply)
-    confirmed = args.confirm == "APPLY-WISSENSWERK"
+    confirmed = bool(args.confirm) and args.confirm == confirm_token(config, "reset")
     status = "dry-run" if dry_run else "applied"
     task_events = []
     if args.apply and not dry_run and not confirmed:
@@ -2904,7 +3110,7 @@ def command_reset(args: argparse.Namespace) -> int:
         "target": args.target,
         "dry_run": dry_run,
         "confirm_required": bool(args.apply and not dry_run),
-        "confirm_token": "APPLY-WISSENSWERK" if args.apply and not dry_run else "",
+        "confirm_hint": "Pass --confirm <token>; the token is set in wissenswerk.yaml under reset_policy." if args.apply and not dry_run else "",
         "affected_paths": plan.get("affected_paths", []),
         "virtual_targets": plan.get("virtual_targets", []),
         "protected_paths": plan.get("protected_paths", []),
@@ -2913,11 +3119,15 @@ def command_reset(args: argparse.Namespace) -> int:
         "tasks": task_events,
         "written": [],
         "removed": [],
+        "skipped": [],
     }
     if status == "applied":
         for value in payload["affected_paths"]:
-            path = repo_path(value)
-            remove_path(path)
+            reason = removal_guard(config, value)
+            if reason:
+                payload["skipped"].append({"path": value, "reason": reason})
+                continue
+            remove_path(repo_path(value))
             payload["removed"].append(value)
         report_path = write_report(config, f"reset_{args.target}", payload)
         payload["written"].append(rel(report_path))
@@ -2938,11 +3148,23 @@ def command_wipe(args: argparse.Namespace) -> int:
     corpus_state = corpus_dir(config)
     reports = repo_path(paths_cfg.get("reports", "reports/wissenswerk"))
     wiki_root = repo_path(paths_cfg.get("wiki", "docs/Wiki"))
-    tenant_paths = existing_path_specs([runtime_state, corpus_state, reports, wiki_root / "Wissenswerk_Platform_Status.md", wiki_root / "Articles"])
+    # `tenant`: generated state and output. `all`: additionally task store and project profile.
+    candidates = [
+        runtime_state,
+        corpus_state,
+        repo_path(paths_cfg.get("analysis", ".wissenswerk/analysis")),
+        repo_path(paths_cfg.get("article_plans", ".wissenswerk/article_plans")),
+        reports,
+        wiki_root / "Wissenswerk_Platform_Status.md",
+        wiki_root / "Articles",
+    ]
+    if args.target == "all":
+        candidates.extend([task_root(config), repo_path(paths_cfg.get("profile", ".wissenswerk/profile"))])
+    tenant_paths = existing_path_specs(candidates)
     protected = [rel(repo_path(path)) for path in paths_cfg.get("sources", [])]
-    protected.extend([rel(wiki_root), "wissenswerk.yaml", "project_manifest.json", "AGENTS.md", "DESIGN.md"])
+    protected.extend(["wissenswerk.yaml", "project_manifest.json", "AGENTS.md", "DESIGN.md", "wissenswerk.py"])
     needs_confirm = bool(args.apply and not (args.dry_run or not args.apply))
-    confirmed = args.confirm == "WIPE-WISSENSWERK"
+    confirmed = bool(args.confirm) and args.confirm == confirm_token(config, "wipe")
     dry_run = bool(args.dry_run or not args.apply)
     status = "dry-run"
     if args.apply and needs_confirm and not confirmed:
@@ -2954,13 +3176,14 @@ def command_wipe(args: argparse.Namespace) -> int:
         "target": args.target,
         "dry_run": dry_run,
         "confirm_required": needs_confirm,
-        "confirm_token": "WIPE-WISSENSWERK" if needs_confirm else "",
+        "confirm_hint": "Pass --confirm <token>; the token is set in wissenswerk.yaml under reset_policy.wipe_all_confirm_token." if needs_confirm else "",
         "affected_paths": tenant_paths,
         "protected_paths": protected,
-        "stale_indexes": ["pgvector", "wiki", "lexical-bootstrap"],
+        "stale_indexes": ["pgvector", "wiki", "lexical-bm25"],
         "next_commands": ["./wissenswerk.py init --json", "./wissenswerk.py ingest --from-ragprep <dir> --apply --json"],
         "tasks": [],
         "removed": [],
+        "skipped": [],
         "written": [],
     }
     if status == "blocked_confirmation_required":
@@ -2976,6 +3199,10 @@ def command_wipe(args: argparse.Namespace) -> int:
         payload["tasks"].append({"trigger": "wipe_apply_without_confirm", **result})
     if status == "applied":
         for value in tenant_paths:
+            reason = removal_guard(config, value)
+            if reason:
+                payload["skipped"].append({"path": value, "reason": reason})
+                continue
             remove_path(repo_path(value))
             payload["removed"].append(value)
         report_path = write_report(config, f"wipe_{args.target}", payload)
@@ -2990,31 +3217,89 @@ def print_wipe(payload: dict[str, Any]) -> None:
         print(f"- affected: {path}")
 
 
+def fold_text(value: str) -> str:
+    """Case- and accent-insensitive form used for matching (offsets stay valid for NFC text)."""
+    decomposed = unicodedata.normalize("NFD", value.casefold())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def search_tokens(value: str) -> list[str]:
+    return [token for token in re.findall(r"\w+", fold_text(value)) if len(token) > 2]
+
+
+def segment_search_documents(config: dict[str, Any]) -> list[dict[str, str]]:
+    path = corpus_dir(config) / "evidence_segments.json"
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    documents = []
+    for segment in payload.get("evidence_segments", []):
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("text") or "")
+        title = str(segment.get("title") or "")
+        documents.append(
+            {
+                "path": f"segment:{evidence_segment_id(segment)}",
+                "kind": "segment",
+                "text": f"{title}\n{text}" if title else text,
+            }
+        )
+    return documents
+
+
 def lexical_search(config: dict[str, Any], query: str, source: str, limit: int) -> list[dict[str, Any]]:
-    roots = []
+    """BM25 ranking over whole words, folded for case and accents. No external dependencies."""
+    roots: list[tuple[Path, str]] = []
     if source in {"raw", "all"}:
-        roots.extend(repo_path(path) for path in config.get("paths", {}).get("sources", []))
+        roots.extend((repo_path(path), "raw") for path in config.get("paths", {}).get("sources", []))
     if source in {"wiki", "all"}:
-        roots.append(repo_path(config.get("paths", {}).get("wiki", "docs/Wiki")))
-    terms = [term.lower() for term in re.findall(r"\w+", query) if len(term) > 2]
-    hits = []
+        roots.append((repo_path(config.get("paths", {}).get("wiki", "docs/Wiki")), "wiki"))
+    documents: list[dict[str, str]] = []
     seen: set[Path] = set()
-    for root in roots:
+    for root, kind in roots:
         if not root.exists():
             continue
         for file_path in sorted(root.rglob("*.md")):
             if file_path in seen:
                 continue
             seen.add(file_path)
-            raw = file_path.read_text(encoding="utf-8", errors="ignore")
-            haystack = raw.lower()
-            score = sum(haystack.count(term) for term in terms)
-            if score <= 0:
+            documents.append({"path": rel(file_path), "kind": kind, "text": file_path.read_text(encoding="utf-8", errors="ignore")})
+    if source in {"segments", "all"}:
+        documents.extend(segment_search_documents(config))
+    query_terms = list(dict.fromkeys(search_tokens(query)))
+    if not query_terms or not documents:
+        return []
+    tokenized = [search_tokens(doc["text"]) for doc in documents]
+    average_length = (sum(len(tokens) for tokens in tokenized) / len(tokenized)) or 1.0
+    doc_count = len(documents)
+    k1, b = 1.5, 0.75
+    hits = []
+    for doc, tokens in zip(documents, tokenized, strict=True):
+        if not tokens:
+            continue
+        counts: dict[str, int] = {}
+        for token in tokens:
+            counts[token] = counts.get(token, 0) + 1
+        score = 0.0
+        for term in query_terms:
+            frequency = counts.get(term, 0)
+            if not frequency:
                 continue
-            snippet_start = min([haystack.find(term) for term in terms if haystack.find(term) >= 0] or [0])
-            snippet = re.sub(r"\s+", " ", raw[snippet_start : snippet_start + 500]).strip()
-            hits.append({"path": rel(file_path), "score": score, "snippet": snippet})
-    hits.sort(key=lambda item: item["score"], reverse=True)
+            containing = sum(1 for other in tokenized if term in other)
+            idf = math.log(1 + (doc_count - containing + 0.5) / (containing + 0.5))
+            score += idf * (frequency * (k1 + 1)) / (frequency + k1 * (1 - b + b * len(tokens) / average_length))
+        if score <= 0:
+            continue
+        folded = fold_text(doc["text"])
+        positions = [pos for pos in (folded.find(term) for term in query_terms) if pos >= 0]
+        start = max(0, (min(positions) if positions else 0) - 60) if len(folded) == len(doc["text"]) else 0
+        snippet = re.sub(r"\s+", " ", doc["text"][start : start + 300]).strip()
+        hits.append({"path": doc["path"], "kind": doc["kind"], "score": round(score, 4), "snippet": snippet})
+    hits.sort(key=lambda item: (-item["score"], item["path"]))
     return hits[:limit]
 
 
@@ -3025,7 +3310,7 @@ def command_search(args: argparse.Namespace) -> int:
         "status": "ok",
         "query": args.query,
         "source": args.source,
-        "retrieval": "lexical-bootstrap",
+        "retrieval": "lexical-bm25",
         "vector_store": config.get("vector_store", {}).get("kind", ""),
         "hits": hits,
         "count": len(hits),
@@ -3290,6 +3575,16 @@ def command_publish_pages(args: argparse.Namespace) -> int:
         blockers.append({"kind": "private_source_leak", "count": audit["summary"]["private_leaks"]})
     if audit["summary"]["blocking_tasks"]:
         blockers.append({"kind": "blocking_tasks", "count": audit["summary"]["blocking_tasks"]})
+    wiki_ignored = wiki_root.exists() and git_ignores(wiki_root)
+    if wiki_ignored:
+        blockers.append(
+            {
+                "kind": "wiki_ignored_by_git",
+                "path": rel(wiki_root),
+                "hint": "The wiki directory is git-ignored, so the Pages workflow would not find it after checkout. "
+                "Remove it from .gitignore (publishing repository) or commit it explicitly.",
+            }
+        )
     workflow_path = repo_path(".github/workflows/pages.yml")
     payload = {
         "status": "blocked" if blockers else "ready",
@@ -3302,46 +3597,19 @@ def command_publish_pages(args: argparse.Namespace) -> int:
             "has_demo_summary": demo_json.exists(),
             "has_pages_workflow": workflow_path.exists(),
             "audit_status": audit["status"],
+            "wiki_tracked_by_git": not wiki_ignored,
         },
         "blockers": blockers,
         "written": [],
         "next_manual_steps": [
             "Create or select the GitHub repository.",
-            "Push the checked tree.",
+            "Commit the generated wiki (it must be tracked by git) and push the checked tree.",
             "Enable GitHub Pages from Actions.",
         ],
     }
     if args.apply and not blockers and not workflow_path.exists():
         ensure_dir(workflow_path.parent)
-        workflow_path.write_text(
-            "\n".join(
-                [
-                    "name: Publish Wissenswerk Pages",
-                    "",
-                    "on:",
-                    "  push:",
-                    "    branches: [main]",
-                    "",
-                    "permissions:",
-                    "  contents: read",
-                    "  pages: write",
-                    "  id-token: write",
-                    "",
-                    "jobs:",
-                    "  pages:",
-                    "    runs-on: ubuntu-latest",
-                    "    steps:",
-                    "      - uses: actions/checkout@v4",
-                    "      - uses: actions/configure-pages@v5",
-                    "      - uses: actions/upload-pages-artifact@v3",
-                    "        with:",
-                    "          path: docs",
-                    "      - uses: actions/deploy-pages@v4",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
+        workflow_path.write_text(pages_workflow_text(rel(wiki_root)), encoding="utf-8")
         payload["written"].append(rel(workflow_path))
     json_print(payload) if args.json else print(f"Wissenswerk publish pages: {payload['status']}")
     return 1 if blockers else 0
@@ -3413,6 +3681,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     ingest = sub.add_parser("ingest", help="Import source documents and RagPrep evidence segments")
     ingest.add_argument("--from-ragprep", required=True)
+    ingest.add_argument("--skip-unreadable", action="store_true", help="Continue with readable records when files or lines cannot be parsed")
     ingest.add_argument("--apply", action="store_true")
     ingest.add_argument("--json", action="store_true")
 
@@ -3441,7 +3710,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     search = sub.add_parser("search", help="Search the configured corpus/wiki")
     search.add_argument("query")
-    search.add_argument("--source", choices=["raw", "wiki", "all"], default="wiki")
+    search.add_argument("--source", choices=["raw", "wiki", "segments", "all"], default="wiki")
     search.add_argument("--top", type=int, default=5)
     search.add_argument("--json", action="store_true")
 

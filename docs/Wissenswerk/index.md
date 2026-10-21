@@ -64,5 +64,5 @@ Tenant-specific display names can be localized.
 - [Publication Readiness](publication-readiness.md)
 - [Demo Test Run](demo-test-run.md)
 - [Discord Bot](discord-bot.md)
-- [Agent System Integration](agent-system-hermes.md)
+- [Agent System Integration](agent-system.md)
 - [Positioning](positioning.md)

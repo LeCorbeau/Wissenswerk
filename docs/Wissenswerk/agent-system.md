@@ -6,11 +6,11 @@ category: Technical
 
 # Wissenswerk Agent System Integration
 
-Wissenswerk is designed so Hermes, Codex, Jules, Gemini CLI, Cursor, Aider, and future hosts can work from the same neutral contracts.
+Wissenswerk is designed so any coding agent or host (for example Codex, Jules, Gemini CLI, Cursor, or Aider) can work from the same neutral contracts.
 
-## Hermes Role
+## Coordinator Role
 
-Hermes should act as a `coordinator` by default:
+The lead agent should act as the `coordinator` by default:
 
 1. Read `AGENTS.md`, `DESIGN.md`, `project_manifest.json`, and `wissenswerk.yaml`.
 2. Run `./wissenswerk.py doctor --json`.
@@ -30,7 +30,7 @@ Localized display names are aliases only. Public role IDs stay English.
 
 ## Skill Surfaces
 
-Hermes should prefer these neutral surfaces:
+The coordinator should prefer these neutral surfaces:
 
 - CLI JSON from `./wissenswerk.py`
 - `AGENTS.md` and nested tenant instructions
@@ -46,7 +46,7 @@ Host-specific skill folders are generated adapter outputs. They must not contain
 doctor -> task digest -> setup/profile -> ingest -> analyze -> plan articles -> build -> audit -> stats -> demo report -> publish pages --dry-run
 ```
 
-For the pre-publication demo run, Hermes should follow [Demo Test Run](demo-test-run.md). That runbook defines the kickoff prompt, setup artifacts, source-document import contract, analysis outputs, success criteria, and required closeout.
+For the pre-publication demo run, the coordinator should follow [Demo Test Run](demo-test-run.md). That runbook defines the kickoff prompt, setup artifacts, source-document import contract, analysis outputs, success criteria, and required closeout.
 
 For maintainer work:
 
@@ -54,4 +54,4 @@ For maintainer work:
 doctor -> hygiene reports -> plan -> apply -> tests -> report
 ```
 
-Hermes should never treat memory or chat history as factual authority. Facts come from sources, wiki pages, provenance, retrieval, and audits.
+The coordinator should never treat memory or chat history as factual authority. Facts come from sources, wiki pages, provenance, retrieval, and audits.

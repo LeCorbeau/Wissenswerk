@@ -7,7 +7,7 @@ You are continuing Wissenswerk as a platform-independent corpus-to-wiki knowledg
 
 Mission:
 - Wissenswerk turns prepared local knowledge collections into an auditable Markdown wiki.
-- Typical demos are not limited to Porreres. They may be hometown history, club archives, family papers, research notes, local institutions, cultural collections, small libraries, or other bounded document corpora.
+- Typical demos are not limited to one place or project. They may be hometown history, club archives, family papers, research notes, local institutions, cultural collections, small libraries, or other bounded document corpora.
 - RagPrep owns parsing, cleanup, OCR/Markdown preparation, and segmentation. Wissenswerk imports those artifacts as source documents and internal evidence segments.
 - Wissenswerk must remain CLI-first, JSON-first, agent-readable, and IDE/platform independent.
 
@@ -20,7 +20,7 @@ Read first:
 - docs/Wissenswerk/demo-test-run.md
 - docs/Wissenswerk/cli.md
 - docs/Wissenswerk/architecture.md
-- docs/Wissenswerk/agent-system-hermes.md
+- docs/Wissenswerk/agent-system.md
 
 Current public workflow:
 1. ./wissenswerk.py doctor --json
@@ -43,7 +43,7 @@ Core model:
 - Private local source paths must not leak into public pages or release artifacts.
 - Signals & Tasks are for anomalies, blockers, approvals, handoffs, audit findings, and meaningful run events only. They are coordination state, not factual authority.
 
-Hermes role:
+Coordinator role:
 - Act as coordinator.
 - Use curator/verifier/maintainer as role scopes when delegating or structuring work.
 - Do not treat chat history or optional memory providers as facts.
@@ -54,7 +54,7 @@ Hermes role:
 Before changing code:
 - Inspect current files with rg/sed.
 - Keep changes scoped and platform independent.
-- Avoid reintroducing Siebenwind/7w-specific semantics into the public core.
+- Avoid reintroducing tenant-specific semantics into the public core.
 - Prefer stdlib and dependency-light behavior for the current release branch.
 
 Verification gate:

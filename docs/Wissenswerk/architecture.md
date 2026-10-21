@@ -23,7 +23,7 @@ RagPrep artifacts -> setup/import profile -> source registry -> evidence segment
 | Corpus analysis | Inventory, entity registry, claim ledger, concept graph, coverage, conflicts | `analyze` |
 | Article planning | Prioritized typed article candidates and recommended sections | `plan articles` |
 | Wiki output | Type-specific Markdown pages, provenance JSON, reports | `build` |
-| Retrieval | Search over raw/wiki/all | `search` |
+| Retrieval | Search over raw/wiki/segments/all | `search` |
 | Coordination | Local Signals and Tasks | `task`, `run status` |
 | Quality | Contract, provider, design, audit, stats, hygiene, and test checks | `doctor`, `audit`, `stats`, `design lint`, `hygiene reports`, `test` |
 | Publish | GitHub Pages readiness without remote side effects | `publish pages` |

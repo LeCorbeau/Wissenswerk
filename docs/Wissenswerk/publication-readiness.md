@@ -65,7 +65,7 @@ This repository is the canonical public repository. Current readiness is establi
 
 ## Demo Release Gate
 
-For a showcase repository such as `porreres-wiki`, run:
+For a showcase repository such as `<showcase-repo>`, run:
 
 ```bash
 ./wissenswerk.py demo run --from-ragprep <dir> --profile local-history --apply --json

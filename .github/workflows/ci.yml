@@ -2,7 +2,7 @@ name: Wissenswerk CI
 
 on:
   push:
-    branches: ["main", "codex/**"]
+    branches: ["main"]
   pull_request:
 
 permissions:
@@ -28,7 +28,19 @@ jobs:
       - name: Syntax check
         run: python -m py_compile wissenswerk.py
 
+      - name: Install lint tooling
+        run: python -m pip install ruff mypy
+
+      - name: Lint (ruff)
+        run: ruff check wissenswerk.py
+
+      - name: Type check (mypy, advisory)
+        # Known payload-typing findings are still being worked down; report them without failing the build.
+        continue-on-error: true
+        run: mypy wissenswerk.py
+
       - name: Validate JSON contracts
+        # wissenswerk.yaml is intentionally JSON-compatible YAML (stdlib-only parsing).
         run: |
           python -m json.tool wissenswerk.yaml >/dev/null
           python -m json.tool project_manifest.json >/dev/null

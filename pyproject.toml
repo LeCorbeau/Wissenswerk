@@ -26,8 +26,25 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+dev = ["ruff>=0.6", "mypy>=1.10"]
+
 [project.scripts]
 wissenswerk = "wissenswerk:main"
 
 [tool.setuptools]
 py-modules = ["wissenswerk"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 160
+
+[tool.ruff.lint]
+select = ["E9", "F", "B", "UP", "SIM"]
+# UP017: the public module namespace keeps `timezone` (tests and callers use `wissenswerk.timezone`).
+ignore = ["UP017"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true

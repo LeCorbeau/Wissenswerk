@@ -10,7 +10,7 @@ Wissenswerk currently provides a dependency-light local CLI prototype. It can cr
 
 The wiki builder is deterministic by default. It renders overview, timeline, source, topic, concept, navigation, sources overview, and glossary pages from the claim ledger and source metadata. Article plans and provenance include a render profile so provider-backed synthesis can be added later without changing the public CLI flow.
 
-Retrieval is still a lexical bootstrap. PostgreSQL + pgvector and OpenAI-compatible embedding/rerank providers are configured as the target architecture, not yet the full default runtime.
+Retrieval is still lexical: BM25 ranking over whole words (case- and accent-insensitive) across wiki pages, raw Markdown sources, and imported evidence segments. PostgreSQL + pgvector and OpenAI-compatible embedding/rerank providers are configured as the target architecture, not yet the full default runtime.
 
 ## Why Not Just RAG?
 
@@ -59,13 +59,17 @@ The inspectable productive flow is:
 - **Markdown-first:** generated knowledge remains inspectable and portable.
 - **RagPrep boundary:** parsing, cleanup, and segmentation happen before Wissenswerk.
 - **Graph before prose:** the compiler analyzes corpus inventory, entities, claims, and concept links before drafting pages.
-- **Claims over vibes:** generated articles are compiled from source-backed candidate claims, not free-form summaries alone.
+- **Claims over vibes:** generated articles are compiled from source-backed candidate claims, not free-form summaries alone. Each claim carries a `claim_kind`: `statement` claims quote a source sentence with character offsets into the evidence segment, while `metadata_fact` claims (mentions, sections, keywords, years) only restate source metadata. Confidence values are heuristic priors per extraction method, not measured probabilities.
 - **No source dumping:** public demos can publish source metadata and generated pages without publishing private full-text corpora.
 - **Provenance first:** auto-apply runs produce reports, auditable state, and rollback hints.
 - **Provider-neutral:** chat, summary, embeddings, and rerank use OpenAI-compatible endpoints.
 - **pgvector default:** PostgreSQL + pgvector is the default retrieval target.
 - **Signals, not chat:** agents use local Tasks for anomalies, blockers, handoffs, approvals, audit findings, and run events.
 - **Agent-readable contracts:** `AGENTS.md`, `DESIGN.md`, `wissenswerk.yaml`, `project_manifest.json`, JSON CLI output, and future MCP/tool manifests are canonical.
+
+## Publishing to GitHub Pages
+
+`publish pages` checks that the wiki directory is tracked by git, because the generated Pages workflow publishes it straight from the checkout. A git-ignored wiki is reported as the blocker `wiki_ignored_by_git`; in a publishing repository, remove `docs/Wiki/` from `.gitignore` or commit the wiki explicitly.
 
 ## Roles
 

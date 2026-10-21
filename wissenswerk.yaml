@@ -100,6 +100,7 @@
     "default_mode": "dry-run",
     "targets": ["memory", "index", "generated", "wiki"],
     "wipe_targets": ["tenant", "all"],
+    "reset_apply_confirm_token": "APPLY-WISSENSWERK",
     "wipe_all_confirm_token": "WIPE-WISSENSWERK",
     "protect_sources_by_default": true
   },
@@ -116,8 +117,8 @@
     ],
     "adapter_policy": {
       "source_of_truth": "canonical_surfaces",
-      "generated_adapter_targets": ["codex"],
-      "future_adapter_targets": ["jules", "gemini-cli", "cursor", "aider", "github-copilot", "zed"],
+      "generated_adapter_targets": [],
+      "future_adapter_targets": ["codex", "jules", "gemini-cli", "cursor", "aider", "github-copilot", "zed"],
       "host_specific_semantics_allowed": false
     }
   },

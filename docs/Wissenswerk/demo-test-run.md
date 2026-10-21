@@ -6,7 +6,7 @@ category: Technical
 
 # Wissenswerk Demo Test Run
 
-This runbook describes the pre-publication demo path for a Hermes-led Wissenswerk project. The goal is to prove that a prepared document corpus can become an auditable Markdown wiki through neutral CLI contracts, without relying on an IDE-specific agent runtime.
+This runbook describes the pre-publication demo path for an agent-led Wissenswerk project. The goal is to prove that a prepared document corpus can become an auditable Markdown wiki through neutral CLI contracts, without relying on an IDE-specific agent runtime.
 
 ## Scenario
 
@@ -17,7 +17,7 @@ The reference demo is a local-history corpus:
 - Public output must not dump private full-text sources.
 - The generated wiki must be inspectable, source-backed, and suitable for GitHub Pages.
 
-Hermes acts as `coordinator`. Other personas are role scopes, not mandatory separate processes:
+The lead agent acts as `coordinator`. Other personas are role scopes, not mandatory separate processes:
 
 - `curator`: source inventory, evidence segment normalization, article planning.
 - `verifier`: provenance, source locators, conflicts, audit findings.
@@ -47,10 +47,10 @@ Recommended source locator fields:
 
 Missing source locators create audit findings. They do not stop ingestion unless the project policy later requires public source links.
 
-## Hermes Kickoff Prompt
+## Coordinator Kickoff Prompt
 
 ```text
-You are Hermes acting as Wissenswerk coordinator.
+You are acting as Wissenswerk coordinator.
 
 Read AGENTS.md, DESIGN.md, wissenswerk.yaml, project_manifest.json, and docs/Wissenswerk/demo-test-run.md.
 Run doctor and task digest with JSON output.
@@ -73,7 +73,7 @@ Use this for a home-style test run:
 ./wissenswerk.py demo run \
   --from-ragprep <ragprep-output-dir> \
   --profile local-history \
-  --project-name "Porreres Local History" \
+  --project-name "Example Local History" \
   --language en \
   --apply \
   --json
@@ -96,7 +96,7 @@ It is convenient, but it is not a black box. Each step has an equivalent standal
 ./wissenswerk.py task digest --since 24h --json
 ```
 
-Hermes checks whether contracts, design lint, provider configuration, gitignore policy, and task storage are usable. Open `critical`, `approval`, or `blocker` tasks must be handled before destructive or public actions.
+The coordinator checks whether contracts, design lint, provider configuration, gitignore policy, and task storage are usable. Open `critical`, `approval`, or `blocker` tasks must be handled before destructive or public actions.
 
 ### 2. Setup
 
@@ -104,7 +104,7 @@ Hermes checks whether contracts, design lint, provider configuration, gitignore 
 ./wissenswerk.py setup \
   --quick \
   --profile local-history \
-  --project-name "Porreres Local History" \
+  --project-name "Example Local History" \
   --from-ragprep <ragprep-output-dir> \
   --language en \
   --json
@@ -126,7 +126,7 @@ Setup also scans the RagPrep directory and records a corpus preview:
 - metadata findings
 - recommended next commands
 
-This is the point where Hermes should notice whether the corpus shape matches the intended project. For a quick local-history demo, the setup questions stay intentionally light. More editorial policy belongs in `setup --guided`.
+This is the point where the coordinator should notice whether the corpus shape matches the intended project. For a quick local-history demo, the setup questions stay intentionally light. More editorial policy belongs in `setup --guided`.
 
 ### 3. Ingest
 
@@ -170,7 +170,7 @@ The concept graph is a bootstrap graph. It connects:
 - claims to evidence segments via `supported_by`
 - source topics to years or related concepts via simple typed relations
 
-Hermes should use this graph to avoid drafting from one isolated document. The point is to first see which concepts recur, which sources support them, and where review is needed.
+The coordinator should use this graph to avoid drafting from one isolated document. The point is to first see which concepts recur, which sources support them, and where review is needed.
 
 ### 5. Plan Articles
 
@@ -188,7 +188,7 @@ Article planning ranks candidates by:
 
 The output is `.wissenswerk/article_plans/article_plan.json`. Planned candidates include article type, subtype, source documents, planning basis, and deterministic render profile metadata.
 
-Hermes should review whether the plan looks plausible before building. For the Porreres-style demo, expected classes of pages are:
+The coordinator should review whether the plan looks plausible before building. For a local-history demo, expected classes of pages are:
 
 - overview article
 - history article
@@ -212,7 +212,7 @@ Build writes generated Markdown and provenance:
 - `docs/Wiki/index.md`
 - `reports/wissenswerk/*_wiki_build.json`
 
-Generated pages must cite source references and must not publish private local source paths. If source coverage is weak, Hermes should leave uncertainty visible rather than smoothing it into confident prose.
+Generated pages must cite source references and must not publish private local source paths. If source coverage is weak, the coordinator should leave uncertainty visible rather than smoothing it into confident prose.
 
 The current renderer is deterministic. It uses article subtype to render overview, timeline, source, topic, concept, navigation, sources overview, and glossary structures. Provider-backed synthesis is a future extension point; it is not invoked during the demo gate.
 
@@ -249,9 +249,9 @@ This does not create a remote repository. It checks whether the local docs tree 
 
 Remote publication remains a human-approved release action.
 
-## What Hermes Should Report At The End
+## What The Coordinator Should Report At The End
 
-Hermes should finish with:
+The coordinator should finish with:
 
 - status of every command
 - generated source-document and evidence-segment counts
@@ -276,4 +276,4 @@ A demo run is publishable when:
 - `audit` has no private source leaks and no missing-source failures.
 - `stats` and `demo report` exist.
 - `publish pages --dry-run` reports `ready`.
-- Hermes leaves no unresolved `critical`, `approval`, or `blocker` tasks.
+- The coordinator leaves no unresolved `critical`, `approval`, or `blocker` tasks.

@@ -23,6 +23,7 @@ Creates or updates the project profile and setup documents. `--quick` is the hom
 
 ```bash
 ./wissenswerk.py ingest --from-ragprep <dir> --apply --json
+./wissenswerk.py ingest --from-ragprep <dir> --skip-unreadable --apply --json
 ```
 
 Imports `.json` and `.jsonl` RagPrep artifacts as source documents with internal evidence segments. Expected evidence-segment fields:
@@ -68,10 +69,11 @@ Builds generated wiki artifacts from article plans and writes per-article proven
 ```bash
 ./wissenswerk.py search "question" --source raw --json
 ./wissenswerk.py search "question" --source wiki --json
+./wissenswerk.py search "question" --source segments --json
 ./wissenswerk.py search "question" --source all --json
 ```
 
-Current retrieval is lexical bootstrap over configured roots. The target implementation is pgvector-backed search with optional answer synthesis.
+Current retrieval is BM25 over whole words (case- and accent-insensitive) across configured roots; `segments` searches imported evidence segments and `all` combines raw, wiki, and segments. The target implementation is pgvector-backed search with optional answer synthesis.
 
 ## Maintainer Commands
 
@@ -89,7 +91,7 @@ Current retrieval is lexical bootstrap over configured roots. The target impleme
 ./wissenswerk.py wipe tenant --dry-run --json
 ```
 
-Reset and wipe commands are dry-run-first. `wipe all` requires the explicit confirm token `WIPE-WISSENSWERK` when applied.
+Reset and wipe commands are dry-run-first. Applying either command requires a confirm token that is read from `reset_policy` in `wissenswerk.yaml` (`reset_apply_confirm_token`, `wipe_all_confirm_token`) and is never echoed in command output. `wipe tenant` removes generated state and output; `wipe all` additionally removes the task store and project profile. Paths that overlap configured sources, contract files, or lie outside the repository are always skipped and listed under `skipped`.
 
 ## Signals & Tasks
 

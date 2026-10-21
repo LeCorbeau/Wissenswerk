@@ -26,13 +26,13 @@ The target retrieval stack is:
 - PostgreSQL + pgvector as default vector store.
 - OpenAI-compatible embedding endpoint.
 - Optional OpenAI-compatible rerank endpoint.
-- Search scopes: `raw`, `wiki`, `all`.
+- Search scopes: `raw`, `wiki`, `segments`, `all`.
 - Optional answer synthesis through the configured chat provider.
 
 Current implementation status:
 
 - `search` exists.
-- lexical bootstrap search works over configured raw/wiki roots.
+- BM25 lexical search works over configured raw/wiki roots and imported evidence segments.
 - pgvector import and semantic ranking are planned next.
 
 ## RagPrep Boundary
@@ -80,6 +80,6 @@ Reset commands are explicit because different state types have different consequ
 - `reset generated`: clears generated reports and temporary classifications.
 - `reset wiki`: clears only clearly generated wiki artifacts.
 - `wipe tenant`: clears local tenant state while protecting sources and contracts.
-- `wipe all`: requires explicit confirmation.
+- `wipe all`: also clears the task store and project profile; requires explicit confirmation.
 
 Every reset/wipe plan must be machine-readable and dry-run-first.
