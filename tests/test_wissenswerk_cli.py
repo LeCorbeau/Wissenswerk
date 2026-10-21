@@ -38,6 +38,17 @@ class WissenswerkCliContractTests(unittest.TestCase):
         self.assertIn(payload["runtime_status"], {"ready", "missing_credentials"})
         self.assertEqual(payload["vector_store"]["kind"], "pgvector")
 
+    def test_hygiene_classifies_tracked_local_archives(self):
+        archives = wissenswerk.tracked_local_archives(
+            [
+                "README.md",
+                "wissenswerk-handoff-20260507-clean.zip",
+                "demo-output.tar.gz",
+                "notes/collection.json",
+            ]
+        )
+        self.assertEqual(archives, ["demo-output.tar.gz", "wissenswerk-handoff-20260507-clean.zip"])
+
     def test_task_store_dedupes_open_signals(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = wissenswerk.TaskStore(Path(tmp) / "tasks")

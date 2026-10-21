@@ -5,6 +5,8 @@ PYTHON ?= python3
 verify:
 	$(PYTHON) -m py_compile wissenswerk.py
 	./wissenswerk.py doctor --json
+	./wissenswerk.py audit --json
+	./wissenswerk.py stats --json
 	./wissenswerk.py test --json
 	./wissenswerk.py design lint --json
 	./wissenswerk.py hygiene reports --json

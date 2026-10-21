@@ -30,6 +30,13 @@ ragprep_outputs/
 .ragprep/
 corpus/.ragprep/
 
+# Local handoff/export archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
 # Bot and memory caches
 bot_session/
 discord_session/

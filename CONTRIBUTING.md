@@ -13,10 +13,12 @@ Wissenswerk is a generic corpus-to-wiki platform. Contributions should keep the 
 ## Development Flow
 
 ```bash
+python3 -m py_compile wissenswerk.py
 ./wissenswerk.py doctor --json
-./wissenswerk.py providers check --json
-./wissenswerk.py design lint --json
+./wissenswerk.py audit --json
+./wissenswerk.py stats --json
 ./wissenswerk.py test --json
+./wissenswerk.py design lint --json
 ./wissenswerk.py hygiene reports --json
 git diff --check
 ```
@@ -25,7 +27,7 @@ Use `--json` where available so agents and CI can parse results reliably.
 
 ## Data and Secrets
 
-Never commit provider keys, Discord tokens, database URLs, local databases, pgvector dumps, private RagPrep outputs, local memory caches, or bot session files. Keep small anonymized fixtures under `tests/fixtures/`.
+Never commit provider keys, Discord tokens, database URLs, local databases, pgvector dumps, private RagPrep outputs, local archives, local memory caches, or bot session files. Keep small anonymized fixtures under `tests/fixtures/`.
 
 ## Pull Requests
 

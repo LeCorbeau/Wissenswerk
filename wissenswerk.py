@@ -26,6 +26,7 @@ TASK_STATUSES = {"submitted", "working", "input-required", "auth-required", "com
 TASK_TERMINAL_STATUSES = {"completed", "failed", "canceled", "rejected"}
 TASK_ROLES = {"coordinator", "curator", "verifier", "maintainer"}
 GENERIC_SECTION_TITLES = {"overview", "introduction", "summary", "contents", "content", "notes", "misc", "general"}
+LOCAL_ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz", ".7z")
 
 
 def now_iso() -> str:
@@ -2622,7 +2623,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         }
     )
     patterns = gitignore_patterns()
-    required_patterns = [".env", ".env.*", "*.sqlite", "*.db", "*.dump", ".wissenswerk/"]
+    required_patterns = [".env", ".env.*", "*.sqlite", "*.db", "*.dump", ".wissenswerk/", "*.zip", "*.tar.gz"]
     missing_patterns = [pattern for pattern in required_patterns if pattern not in patterns]
     checks.append(
         {
@@ -2683,6 +2684,10 @@ def run_git_ls_files(paths: list[str] | None = None) -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def tracked_local_archives(files: list[str]) -> list[str]:
+    return sorted(file_path for file_path in files if file_path.casefold().endswith(LOCAL_ARCHIVE_SUFFIXES))
+
+
 def directory_size(path: Path) -> int:
     if not path.exists():
         return 0
@@ -2737,14 +2742,17 @@ def report_hygiene_inventory() -> dict[str, Any]:
     entries = []
     total_files = 0
     tracked_files = 0
+    excluded_tracked_files = 0
     total_bytes = 0
     for root in roots:
         root_path = repo_path(root["path"])
         tracked = run_git_ls_files([root["path"]])
+        excluded_tracked = len(tracked) if root["publish_policy"].startswith("exclude") else 0
         files = count_files(root_path)
         size = directory_size(root_path)
         total_files += files
         tracked_files += len(tracked)
+        excluded_tracked_files += excluded_tracked
         total_bytes += size
         entries.append(
             {
@@ -2753,23 +2761,32 @@ def report_hygiene_inventory() -> dict[str, Any]:
                 "files_total": files,
                 "tracked_files": len(tracked),
                 "bytes": size,
-                "status": "review" if root["publish_policy"].startswith("exclude") and tracked else "ok",
+                "status": "review" if excluded_tracked else "ok",
             }
         )
+    local_archives = tracked_local_archives(run_git_ls_files())
+    archive_bytes = sum(repo_path(path).stat().st_size for path in local_archives if repo_path(path).exists())
     return {
-        "status": "review" if tracked_files else "ok",
+        "status": "review" if excluded_tracked_files or local_archives else "ok",
         "scope": "branch_cleanup",
         "roots": entries,
+        "local_archives": {
+            "publish_policy": "exclude_from_public_wissenswerk",
+            "tracked_files": local_archives,
+            "bytes": archive_bytes,
+            "status": "review" if local_archives else "ok",
+        },
         "summary": {
             "files_total": total_files,
-            "tracked_files": tracked_files,
-            "bytes_total": total_bytes,
+            "tracked_files": tracked_files + len(local_archives),
+            "tracked_excluded_files": excluded_tracked_files + len(local_archives),
+            "bytes_total": total_bytes + archive_bytes,
         },
         "recommendations": [
             "Do not include generated logs, legacy coordination state, archive indexes, runtime caches, or local archives in the public repository.",
             "Keep reports runtime-generated and ignored; commit only stable contracts, fixtures, and documentation dossiers.",
             "Use `./wissenswerk.py task digest --json` for active coordination instead of publishing local task state.",
-            "Use doctor, test, hygiene reports, and git diff checks as the direct repository release gate.",
+            "Use doctor, audit, stats, test, hygiene reports, and git diff checks as the direct repository release gate.",
         ],
     }
 
@@ -2787,6 +2804,9 @@ def print_hygiene_reports(payload: dict[str, Any]) -> None:
             f"- {root['path']}: files={root['files_total']} tracked={root['tracked_files']} "
             f"policy={root['publish_policy']}"
         )
+    archives = payload.get("local_archives", {})
+    if archives:
+        print(f"- local archives: tracked={len(archives.get('tracked_files', []))} policy={archives.get('publish_policy', '')}")
 
 
 def command_test(args: argparse.Namespace) -> int:

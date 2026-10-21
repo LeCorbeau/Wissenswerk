@@ -39,6 +39,12 @@ jobs:
       - name: Run doctor
         run: ./wissenswerk.py doctor --json
 
+      - name: Run audit
+        run: ./wissenswerk.py audit --json
+
+      - name: Run stats
+        run: ./wissenswerk.py stats --json
+
       - name: Run design lint
         run: ./wissenswerk.py design lint --json
 
